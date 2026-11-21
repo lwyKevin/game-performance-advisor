@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Game Performance Advisor</title><style>
+:root{--bg:#070b14;--panel:#111827;--line:#263449;--text:#edf4ff;--muted:#9aa9bc;--cyan:#66d9ff;--green:#67dda7;--yellow:#ffd166}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top right,#17243a,#070b14 48%);color:var(--text);font-family:Inter,Segoe UI,system-ui,sans-serif}.shell{max-width:1120px;margin:auto;padding:36px 24px}.top{display:flex;justify-content:space-between;align-items:end}.top h1{margin:0}.badge{color:var(--green);border:1px solid #355c50;padding:7px 10px;border-radius:999px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px}.panel,.metric{background:rgba(17,24,39,.94);border:1px solid var(--line);border-radius:14px}.metric{padding:16px}.metric span{display:block;color:var(--muted);font-size:12px}.metric strong{display:block;font-size:28px;margin-top:8px}.main{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}.panel{padding:20px}.row{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding:9px 0}.row:first-of-type{border-top:0}.muted{color:var(--muted)}.cyan{color:var(--cyan)}.green{color:var(--green)}.priority{line-height:1.8}@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}.main{grid-template-columns:1fr}}
+</style></head><body><main class="shell">
+<div class="top"><h1>GAME PERFORMANCE ADVISOR</h1><span class="badge">Live system snapshot</span></div>
+<div class="grid">
+<div class="metric"><span>Performance Score</span><strong>67 / 100</strong></div>
+<div class="metric"><span>Smoothness Score</span><strong>66 / 100</strong></div>
+<div class="metric"><span>FG Readiness</span><strong>20 / 100</strong></div>
+<div class="metric"><span>Confidence</span><strong>72 / 100</strong></div></div>
+<div class="main">
+<section class="panel"><h2>System Summary</h2>
+<div class="row"><span>CPU</span><strong>13th Gen Intel(R) Core(TM) i5-13500</strong></div><div class="row"><span>GPU</span><strong>NVIDIA GeForce RTX 4060 Ti, Intel(R) UHD Graphics 770</strong></div>
+<div class="row"><span>RAM</span><strong>31.8 GB</strong></div><div class="row"><span>Display</span><strong>3840x2160 @ 60 Hz</strong></div>
+<div class="row"><span>Operating System</span><strong>Microsoft Windows 11 專業版 10.0.26300</strong></div></section>
+<section class="panel"><h2>Performance Snapshot</h2>
+<div class="row"><span>CPU utilization</span><strong>59%</strong></div><div class="row"><span>GPU utilization</span><strong>30%</strong></div>
+<div class="row"><span>Memory utilization</span><strong>88%</strong></div></section></div>
+<div class="main"><section class="panel"><h2>Diagnosis</h2><h3 class="cyan">Memory Pressure</h3>
+<p class="muted">Alternative: CPU or storage pressure</p><h3>Evidence</h3><ul><li>GPU utilization was 30% during the snapshot</li><li>CPU utilization was 59%</li><li>Memory utilization was 88%</li><li>Detected likely game process: RobloxPlayerBeta</li><li>Display is 3840x2160 at 60 Hz</li></ul></section>
+<section class="panel"><h2>Recommendation</h2><h3 class="green">Not recommended yet</h3>
+<div class="row"><span>Upscaling</span><strong>Use Balanced or Quality only if stable frame time is preserved</strong></div><div class="row"><span>Frame Generation</span><strong>Not recommended yet (None)</strong></div>
+<div class="row"><span>Estimated Benefit</span><strong>Low or uncertain</strong></div><div class="row"><span>Latency Impact</span><strong>Fix pacing first; enabling FG may amplify hitches</strong></div></section></div>
+<section class="panel" style="margin-top:12px"><h2>Action Plan</h2><ol class="priority"><li>Reduce CPU-heavy settings or background workload</li><li>Verify memory capacity and paging</li><li>Re-test performance before enabling Frame Generation</li></ol></section>
+</main></body></html>
