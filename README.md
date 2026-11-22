@@ -21,16 +21,16 @@ Analyze another bundled sample:
 docker run --rm gpa analyze /samples/mixed_hitching.csv --target-fps 60
 ```
 
-Mount a host CSV from the current directory. In Bash:
+Mount the repository directory and analyze one of its real bundled CSV files. In Bash:
 
 ```bash
-docker run --rm --mount type=bind,source="$(pwd)",target=/data gpa analyze /data/recording.csv --target-fps 144
+docker run --rm --mount type=bind,source="$(pwd)",target=/data gpa analyze /data/samples/mixed_hitching.csv --target-fps 60
 ```
 
 In PowerShell:
 
 ```powershell
-docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/data" gpa analyze /data/recording.csv --target-fps 144
+docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/data" gpa analyze /data/samples/mixed_hitching.csv --target-fps 60
 ```
 
 On Linux, scan hardware explicitly:
