@@ -1,9 +1,48 @@
 package main
 
 import (
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestHardwarePlatformDetection(t *testing.T) {
+	tests := []struct {
+		goos    string
+		windows bool
+	}{
+		{goos: "windows", windows: true},
+		{goos: "linux", windows: false},
+		{goos: "darwin", windows: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			if got := isWindowsHardwarePlatform(tt.goos); got != tt.windows {
+				t.Errorf("isWindowsHardwarePlatform(%q) = %v, want %v", tt.goos, got, tt.windows)
+			}
+		})
+	}
+}
+
+func TestRunHardwareCommandsFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("non-Windows fallback behavior")
+	}
+
+	for _, command := range []string{"scan", "monitor"} {
+		t.Run(command, func(t *testing.T) {
+			err := run([]string{command}, os.Stdout, os.Stderr)
+			if err == nil {
+				t.Fatalf("run(%q) returned no error", command)
+			}
+			if err.Error() != hardwareScanUnavailableMessage() {
+				t.Fatalf("run(%q) error = %q, want %q", command, err.Error(), hardwareScanUnavailableMessage())
+			}
+		})
+	}
+}
 
 func TestParseCaptureArgs(t *testing.T) {
 	tests := []struct {

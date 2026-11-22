@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -27,6 +28,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
+}
+
+func hardwareScanUnavailableMessage() string {
+	return "Hardware scan is only supported on Windows. However, you can still use the 'analyze' and 'compare' commands for frame-time analysis."
+}
+
+func isWindowsHardwarePlatform(goos string) bool {
+	return goos == "windows"
 }
 
 func runAppMode(stdout, stderr *os.File) error {
@@ -55,6 +64,9 @@ func runAppMode(stdout, stderr *os.File) error {
 
 func run(args []string, stdout, stderr *os.File) error {
 	if len(args) == 0 {
+		if !isWindowsHardwarePlatform(runtime.GOOS) {
+			return errors.New(hardwareScanUnavailableMessage())
+		}
 		return runAppMode(stdout, stderr)
 	}
 	switch args[0] {
@@ -62,6 +74,9 @@ func run(args []string, stdout, stderr *os.File) error {
 		printUsage(stdout)
 		return nil
 	case "scan":
+		if !isWindowsHardwarePlatform(runtime.GOOS) {
+			return errors.New(hardwareScanUnavailableMessage())
+		}
 		return runScan(args[1:], stdout, stderr)
 	case "monitor", "capture":
 		if args[0] == "capture" && len(args) > 1 &&
@@ -71,6 +86,9 @@ func run(args []string, stdout, stderr *os.File) error {
 		}
 		if args[0] == "capture" {
 			return runFrameCapture(args[1:], stdout, stderr)
+		}
+		if !isWindowsHardwarePlatform(runtime.GOOS) {
+			return errors.New(hardwareScanUnavailableMessage())
 		}
 		return runMonitor(args[1:], stdout, stderr)
 	case "analyze":
