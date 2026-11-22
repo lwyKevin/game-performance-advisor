@@ -22,12 +22,16 @@ docker run --rm gpa
 
 The default command analyzes `samples/smooth_60fps.csv` and prints the FPS statistics immediately.
 
+![Docker frame analysis](docs/screenshots/docker-frame-analysis.png)
+
 Analyze another bundled sample:
 
 ```bash
 docker run --rm gpa analyze /samples/mixed_hitching.csv --target-fps 60
 docker run --rm gpa analyze /samples/cpu_stutter.csv --target-fps 60
 ```
+
+![Docker hitching analysis](docs/screenshots/docker-hitching.png)
 
 Mount a CSV from the host and analyze it:
 
@@ -36,6 +40,16 @@ docker run --rm -v "${PWD}:/data" gpa analyze /data/recording.csv --target-fps 1
 ```
 
 The container uses a Linux binary. Frame-time analysis works in Docker on Linux, macOS, and Windows hosts.
+
+Compare two bundled samples and write an HTML report into the current host directory:
+
+```cmd
+docker run --rm -v "%CD%:/data" gpa compare /samples/smooth_60fps.csv /samples/mixed_hitching.csv --target-fps 60 --html /data/comparison.html
+```
+
+![Before/after Docker comparison](docs/screenshots/comparison.png)
+
+The generated HTML report is available at [comparison.html](comparison.html).
 
 ## Frame-Time CSV Format
 
@@ -148,11 +162,24 @@ The CLI dispatches to these paths in [the application entry point](cmd/game-perf
 
 This project was developed iteratively with GitHub Copilot:
 
-1. **Scoped the product** - kept frame-time CSV analysis as the primary cross-platform workflow and treated Windows hardware diagnostics as an optional bonus.
-2. **Mapped the existing code** - inspected the CLI, input, analysis, recommendation, report, system, metrics, and Docker packages before changing behavior.
-3. **Implemented in small increments** - added non-Windows CLI guards, platform-focused tests, Docker-first documentation, and clarified CSV compatibility.
-4. **Verified behavior** - ran `go test ./...`, rebuilt the Docker image, ran the default sample, and checked the Docker fallback for `scan` and `monitor`.
-5. **Documented the result** - added Docker-first setup, command examples, architecture diagrams, Windows limitations, and this AI-assisted workflow.
+### How I directed Copilot
+
+- **Scope freeze:** I told Copilot to remove PresentMon support claims and make the CSV contract explicit: "Frame analysis accepts CSV files with `frame,frametime_ms` columns." I also required it to change documentation only, verify `go test ./...`, and verify `docker run --rm gpa`.
+- **README clarity:** I asked for separate instructions for Windows users, developers, and Docker reviewers. I also required claims to be verified against `main.go`, `go.mod`, and the Dockerfile rather than invented.
+- **Cross-platform refactor:** I requested that `scan` and `monitor` use `runtime.GOOS` and fail gracefully outside Windows, while `analyze` and `compare` continue to work. I did not allow a rewrite of the frame-analysis code.
+- **Platform tests:** I asked for a test that can verify non-Windows fallback behavior without attempting Windows hardware collection.
+- **Architecture and submission evidence:** I requested Mermaid diagrams from copilot to make diagrams for this README
+
+### How I evaluated and corrected the output
+
+1. **Checked source-of-truth files** - Copilot had to inspect `go.mod`, `main.go`, the system/metrics collectors, and the Dockerfile before making claims.
+2. **Rejected unsupported edits** - I required README-only changes during scope-freeze work and did not allow parser, dependency, test, sample, or Dockerfile changes outside the requested task.
+3. **Found and fixed verification failures** - A new fallback implementation initially failed Go vet due to a non-constant `fmt.Errorf` format. Copilot replaced it with `errors.New`, and both the Docker build and Go tests were rerun.
+4. **Verified Docker behavior** - I required the default container command to print the 60-FPS sample analysis and separately checked `scan` and `monitor` inside the Linux image.
+5. **Corrected platform wording** - A README claim that Linux hardware commands were unavailable was adjusted based on the code's Linux `/proc` collectors. The final position is that Windows hardware diagnostics are the bonus feature, but the task-specific fallback is implemented explicitly.
+6. **Validated diffs** - I reviewed changed files and did not retain unrelated worktree changes or assume that a prebuilt `.exe` existed.
+
+The prompts were deliberately specific about scope, affected files, required behavior, and validation commands. Copilot's first plausible implementation was not accepted automatically; repository evidence and test/container output were used to correct it.
 
 Representative tools and checks used:
 
