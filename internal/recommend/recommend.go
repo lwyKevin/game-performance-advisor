@@ -30,6 +30,7 @@ const (
 	// base FPS is at least 10 FPS below target. This avoids recommending extra
 	// latency for a stream that is already close to its goal.
 	FrameGenerationTargetGapFPS = 10.0
+	FrameGenerationTargetMargin = 0.95
 )
 
 func Recommend(a analysis.Result, targetFPS float64) Result {
@@ -64,8 +65,19 @@ func Recommend(a analysis.Result, targetFPS float64) Result {
 	isSpikeHeavy := strings.Contains(a.Bottleneck, "CPU-bound") ||
 		strings.Contains(a.Bottleneck, "mixed")
 	isHitching := strings.Contains(a.Bottleneck, "Stutter")
+	meetsTarget := targetFPS > 0 && a.AverageFPS >= targetFPS*FrameGenerationTargetMargin
 
 	switch {
+	case meetsTarget:
+		fg = "Not recommended"
+		multiplier = "None"
+		latency = "The base stream already meets the target; added FG latency is not justified."
+		added = 0
+		latencyRange = "+0 ms; no frame-generation benefit"
+		suitability = 12
+		risk = "Low"
+		reason = "The base frame rate meets or is within 5% of the target, so frame generation would add latency without providing a visual refresh-rate benefit."
+		upscaling = "Base FPS already meets the target; frame generation is not needed."
 	case isSpikeHeavy || a.CoefficientVar >= 18 || a.StutterPercent >= 8:
 		fg = "Not recommended yet"
 		multiplier = "None"
@@ -122,10 +134,10 @@ func Recommend(a analysis.Result, targetFPS float64) Result {
 		actions = append(actions, "Fix CPU bottleneck, background activity, or shader/streaming hitches first")
 	} else if isHitching {
 		actions = append(actions, "Investigate shader loading, streaming, drivers, or isolated background hitches first")
-	} else if isGPU {
+	} else if isGPU && !meetsTarget {
 		actions = append(actions, "Enable Quality or Balanced spatial upscaling, then retest base FPS")
 	}
-	if upscaling != "" && !smooth {
+	if upscaling != "" && !smooth && !meetsTarget {
 		actions = append(actions, "Enable spatial upscaling before frame generation")
 	}
 	if fg == "Likely helpful" {

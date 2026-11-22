@@ -74,13 +74,12 @@ The `data/` directory contains example recordings and converted CSV files:
 - `data/src/` contains raw capture examples.
 - `data/dst/` contains compatible files with the required `frame,frametime_ms` columns.
 
-The optional `presentmon_converter.py` helper converts a raw capture export into
+The optional `presentmon_converter.py` helper converts a raw Intel PresentMon capture export into
 the CSV format accepted by GPA. It is not part of the Go CLI or its runtime:
 
 ```powershell
-python .\presentmon_converter.py `
-  .\data\src\pmcap-LimbusCompany.exe-261121-220342.csv `
-  .\data\dst\limbus_frametimes.csv
+python .\presentmon_converter.py .\data\src\pmcap-LimbusCompany.exe-261121-220342.csv .\data\dst\limbus_frametimes.csv
+
 docker run --rm -v "${PWD}:/data" gpa analyze /data/data/dst/limbus_frametimes.csv
 ```
 

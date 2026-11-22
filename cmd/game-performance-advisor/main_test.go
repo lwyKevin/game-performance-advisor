@@ -1,10 +1,39 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/example/game-performance-advisor/internal/platform"
+	"github.com/example/game-performance-advisor/internal/report"
 )
+
+func TestAnalyzeJSONIncludesEnvironment(t *testing.T) {
+	stdout, err := os.CreateTemp("", "gpa-analyze-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(stdout.Name())
+	defer stdout.Close()
+
+	if err := run([]string{"analyze", "../../samples/smooth_60fps.csv", "--target-fps", "60", "--json"}, stdout, os.Stderr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdout.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload report.Report
+	if err := json.NewDecoder(stdout).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	want := platform.NewCollector().Environment()
+	if payload.Environment != want {
+		t.Fatalf("analyze environment = %q, want %q", payload.Environment, want)
+	}
+}
 
 func TestRemovedCommandsAreRejected(t *testing.T) {
 	for _, command := range []string{"monitor", "compare", "capture"} {

@@ -105,9 +105,11 @@ func runAnalyze(args []string, stdout, stderr *os.File) error {
 		return err
 	}
 	recommendation := recommend.Recommend(result, *targetFPS)
+	environment := platform.NewCollector().Environment()
 	p := report.Report{
-		Command:  "analyze",
-		Platform: runtime.GOOS,
+		Command:     "analyze",
+		Platform:    runtime.GOOS,
+		Environment: environment,
 		Frame: &report.FramePayload{
 			Source:         args[0],
 			TargetFPS:      *targetFPS,

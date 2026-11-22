@@ -29,6 +29,22 @@ func TestSmoothRecommendation(t *testing.T) {
 	}
 }
 
+func TestStable60FPSAtTargetNotRecommended(t *testing.T) {
+	r := Recommend(analysis.Result{
+		AverageFPS:       60,
+		OnePercentLowFPS: fpsPointer(49.8),
+		CoefficientVar:   2,
+		StutterPercent:   0,
+		Bottleneck:       "Likely GPU-bound",
+	}, 60)
+	if r.FrameGeneration != "Not recommended" {
+		t.Fatalf("frame generation = %s, want Not recommended", r.FrameGeneration)
+	}
+	if r.FGMultiplier != "None" {
+		t.Fatalf("FG multiplier = %s, want None", r.FGMultiplier)
+	}
+}
+
 func TestGPUBoundRecommendation(t *testing.T) {
 	r := Recommend(analysis.Result{
 		AverageFPS:       40,
