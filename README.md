@@ -130,6 +130,36 @@ internal/metrics/
 
 The `analyze` and `compare` commands read the supplied files and do not require live machine access. This is the cross-platform core of the project.
 
+## Scope and Verification
+
+The primary submission scope is frame-time CSV analysis and Docker execution. System inventory, monitoring, report formats, and Windows-only hardware support are existing supporting features, not the main reviewer demonstration.
+
+The frame-time calculations are verified with known values rather than only by ensuring the tests compile:
+
+- `100 × 16.67 ms` with no hitching has 60 FPS average, zero stutters, and 100/100 frame health under the smooth test thresholds.
+- `16 ms` repeated nine times with `50 ms` for the tenth frame has one stutter and a median of `16 ms`.
+- A 1000-frame dataset with nine slow `16.67 ms` frames and one `100 ms` frame has approximately 39.995 FPS 1% low and 10 FPS 0.1% low.
+- A 100-frame dataset alternating `16.67 ms` and `33.34 ms` has a 25.005 ms average and approximately 33.333% coefficient of variation.
+- The 1%/0.1% low calculations sort frametimes, take the slowest `ceil(frame_count × 0.01)` or `ceil(frame_count × 0.001)` frames, average those frametimes, and convert `1000 / average_ms` to FPS.
+- A stutter is counted when a frametime is greater than `1.8 ×` the median; the default threshold is configurable with `--stutter-threshold`.
+
+For the 1000-frame 1% low example, 999 frames are `16.67 ms` and one frame is `100 ms`. GPA sorts the frametimes and takes the slowest `ceil(1000 × 0.01) = 10` frames. It averages their frametimes: `(9 × 16.67 + 100) ÷ 10 = 25.003 ms`. It then converts that average to FPS: `1000 ÷ 25.003 = approximately 39.995 FPS`. For 0.1% low, it takes the slowest `ceil(1000 × 0.001) = 1` frame and converts `100 ms` to `10 FPS`.
+
+These rules are implemented in [the analysis package](internal/analysis/analysis.go). The unit tests cover smooth data, 1%/0.1% low values, coefficient-of-variation frame pacing, one hitch, invalid input, and occasional hitch classification.
+
+## Live Demo
+
+Run the Docker workflow as the primary interview demonstration:
+
+```bash
+docker build -t gpa .
+docker run --rm gpa
+docker run --rm gpa analyze /samples/mixed_hitching.csv --target-fps 60
+docker run --rm gpa compare /samples/smooth_60fps.csv /samples/mixed_hitching.csv --target-fps 60
+```
+
+The final command shows a 60 FPS smooth recording compared with a 47.4 FPS recording containing 4.0% stutters. This live sequence demonstrates parsing, analysis, diagnosis, and before/after reporting without requiring Windows hardware access.
+
 ## Design
 
 The frame-time workflow is independent of the operating system and can run in Docker:
@@ -176,8 +206,9 @@ This project was developed iteratively with GitHub Copilot:
 2. **Rejected unsupported edits** - I required README-only changes during scope-freeze work and did not allow parser, dependency, test, sample, or Dockerfile changes outside the requested task.
 3. **Found and fixed verification failures** - A new fallback implementation initially failed Go vet due to a non-constant `fmt.Errorf` format. Copilot replaced it with `errors.New`, and both the Docker build and Go tests were rerun.
 4. **Verified Docker behavior** - I required the default container command to print the 60-FPS sample analysis and separately checked `scan` and `monitor` inside the Linux image.
-5. **Corrected platform wording** - A README claim that Linux hardware commands were unavailable was adjusted based on the code's Linux `/proc` collectors. The final position is that Windows hardware diagnostics are the bonus feature, but the task-specific fallback is implemented explicitly.
+5. **Rejected technically passing but misleading claims** - One README draft said Linux hardware access was unavailable even though the code also has Linux `/proc` CPU, memory, process, and inventory collectors. The implementation could pass every test and still overstate the limitation, so I rewrote the wording to keep Windows diagnostics as the bonus feature and describe Docker as an intentionally limited Linux frame-analysis environment.
 6. **Validated diffs** - I reviewed changed files and did not retain unrelated worktree changes or assume that a prebuilt `.exe` existed.
+7. **Checked the analysis math independently** - I verified the formula for 1% and 0.1% low FPS, coefficient of variation, and the `median × 1.8` stutter threshold against known datasets, then added exact known-value assertions.
 
 The prompts were deliberately specific about scope, affected files, required behavior, and validation commands. Copilot's first plausible implementation was not accepted automatically; repository evidence and test/container output were used to correct it.
 
