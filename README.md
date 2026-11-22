@@ -9,13 +9,23 @@ It has two use cases:
 
 The source code is the product repository. A prebuilt `gpa.exe` is not included in this repository.
 
+## Pick your path
+
+| If you are... | Use this |
+|---|---|
+| A Windows user who wants the full PC report | Build and double-click `gpa.exe` (Option 1) |
+| A Windows user who wants to analyze a frametime CSV | Build `gpa.exe`, then use PowerShell (Option 2) |
+| A reviewer or developer on Linux / Mac / Docker | Use Docker (see "Developer: Test with Docker") |
+
+You do not need all three. Pick the one that matches your situation.
+
 ## User: Run on Windows
 
 GPA is designed to be run as a Windows executable.
 
 ### Option 1: Install Go and build it yourself
 
-Install Go 1.26 or newer, open PowerShell in this repository, and run:
+Install a Go toolchain compatible with the version declared in `go.mod`, open PowerShell in this repository, and run:
 
 ```powershell
 go build -trimpath -ldflags="-s -w" -o gpa.exe .\cmd\game-performance-advisor
@@ -46,24 +56,23 @@ Analyze a frametime CSV:
 
 ```powershell
 .\gpa.exe analyze .\samples\smooth_60fps.csv --target-fps 60
-```
-
-Generate an HTML report from frame-time analysis:
-
-```powershell
-.\gpa.exe analyze .\recording.csv --target-fps 144 --html frame-analysis.html
+.\gpa.exe analyze .\samples\smooth_60fps.csv --target-fps 60 --json
+.\gpa.exe analyze .\samples\smooth_60fps.csv --target-fps 60 --report frame-analysis.md
 ```
 
 Compare two recordings:
 
 ```powershell
 .\gpa.exe compare .\before.csv .\after.csv --target-fps 60
+.\gpa.exe compare .\before.csv .\after.csv --target-fps 60 --report comparison.md --html comparison.html
 ```
 
 Monitor average utilization over time:
 
 ```powershell
 .\gpa.exe monitor --duration 15 --interval 2
+.\gpa.exe monitor --duration 15 --interval 2 --json
+.\gpa.exe monitor --duration 15 --interval 2 --report monitor.md --html monitor.html
 ```
 
 Run `.\gpa.exe --help` to show the available commands.
@@ -88,7 +97,7 @@ Bundled examples are in [`samples/`](samples/):
 - `mixed_hitching.csv`
 - `cpu_stutter.csv`
 
-Tools that export frametime data, such as CapFrameX or RTSS, can produce a compatible CSV. GPA does not require a particular capture application if the CSV contains the required frametime values.
+Tools that export frametime data, such as CapFrameX or RTSS, can produce compatible CSV files after column export or conversion. GPA parses the `frame,frametime_ms` format only; raw multi-column capture exports are not parsed directly.
 
 ## Developer: How the project works
 
@@ -204,8 +213,8 @@ You can also distribute source instructions, as this repository does, so users c
 
 ## Reports
 
-- `--json` prints machine-readable system or frame-analysis JSON.
-- `--report <file.md>` writes a Markdown report.
-- `--html <file.html>` writes a standalone HTML report.
+- `scan` and `monitor` support `--json`, `--report <file.md>`, and `--html <file.html>`.
+- `analyze` supports `--json` and `--report <file.md>`; it does not support `--html`.
+- `compare` supports `--report <file.md>` and `--html <file.html>`.
 
 The HTML report uses embedded templates and does not require the source repository to remain beside the executable at runtime.
