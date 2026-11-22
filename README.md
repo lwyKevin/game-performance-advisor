@@ -36,6 +36,18 @@ go run ./cmd/game-performance-advisor scan
 
 `scan` reports procfs/sysfs inventory and, where available, NVIDIA utilization. Missing GPU or display values are shown as unavailable rather than fabricated.
 
+In Docker, JSON `scan` output includes `"environment": "container (linux)"`. Its CPU/GPU counters reflect the container runtime, not the Windows host. Run the Windows adapter natively for host metrics.
+
+The `scan` evidence gate does not emit a balanced bottleneck diagnosis from a 1% CPU reading or unavailable GPU data. It instead returns:
+
+```text
+Diagnosis
+  Insufficient evidence for bottleneck diagnosis (20% confidence)
+
+Recommendation
+  Frame Generation: Defer: insufficient bottleneck evidence
+```
+
 ## CLI
 
 ```text
@@ -54,6 +66,30 @@ frame,frametime_ms
 ```
 
 The `frametime_ms` column is required. Missing, blank, invalid, zero, and negative values are errors. Extra columns are allowed. Raw multi-column exports from CapFrameX or RTSS require conversion.
+
+## Example data and Python helper
+
+The `data/` directory contains example recordings and converted CSV files:
+
+- `data/src/` contains raw capture examples.
+- `data/dst/` contains compatible files with the required `frame,frametime_ms` columns.
+
+The optional `presentmon_converter.py` helper converts a raw capture export into
+the CSV format accepted by GPA. It is not part of the Go CLI or its runtime:
+
+```powershell
+python .\presentmon_converter.py `
+  .\data\src\pmcap-LimbusCompany.exe-261121-220342.csv `
+  .\data\dst\limbus_frametimes.csv
+docker run --rm -v "${PWD}:/data" gpa analyze /data/data/dst/limbus_frametimes.csv
+```
+
+The helper filters invalid rows and reports how many frames were written. You
+can also analyze a converted file directly with a local Go build:
+
+```powershell
+go run .\cmd\game-performance-advisor analyze .\data\dst\limbus_frametimes.csv
+```
 
 ## Analysis Rules
 
@@ -83,6 +119,8 @@ The system scan uses documented candidate thresholds:
 
 These thresholds are tunable heuristics. The frame recommendation is tied to stable pacing, target FPS, and bottleneck evidence: CPU-heavy or unstable streams are not recommended for frame generation.
 
+Hardware bottleneck diagnosis requires a CPU measurement over at least 1 second with a plausible value above 5%, plus GPU utilization availability. If evidence is insufficient, the diagnosis is `"Insufficient evidence for bottleneck diagnosis"` with confidence capped at 20, and frame generation is deferred rather than recommended.
+
 ## Architecture
 
 ```mermaid
@@ -101,7 +139,7 @@ flowchart LR
 
 ## Scope Trade-Off
 
-The submission intentionally keeps only `scan` and `analyze`. `monitor`, `compare`, capture/PresentMon, HTML reports, and Markdown reports were removed because they add separate report paths and product surfaces without improving the Linux/Docker reviewer result.
+The submission intentionally keeps only `scan` and `analyze` because they are the two commands that provide a runnable Linux/Docker result and a defensible scope without extra report paths.
 
 ## AI-Assisted Workflow
 
@@ -113,7 +151,7 @@ The project was developed in short, scoped passes:
 2. Cross-platform pass: stop blocking Linux and route frame analysis through Docker.
 3. Code review: replace an AI-suggested `fmt.Errorf(dynamicString)` issue with a constant error and rerun tests.
 4. Math review: identify that percentile logic must operate on frame times, not instantaneous FPS. I added known-value and bimodal tests rather than trusting passing calculations.
-5. Scope cut: remove monitor, compare, capture, HTML, and Markdown to leave the two runnable command paths.
+5. Scope cut: reduce the product to the two runnable command paths.
 
 Approach to AI output:
 

@@ -1,6 +1,6 @@
 $ErrorActionPreference='SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-Start-Sleep -Milliseconds 250
+Start-Sleep -Milliseconds 1000
 $cpu=0
 try {
   $cpuCounter=Get-Counter '\Processor(_Total)\% Processor Time' -ErrorAction Stop

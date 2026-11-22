@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"encoding/json"
 	"math"
 	"strings"
 	"testing"
@@ -47,8 +48,8 @@ func TestAnalyzeDetectsOneHitch(t *testing.T) {
 	if result.OnePercentLowAvailable {
 		t.Fatal("1% low should be unavailable for 10 frames")
 	}
-	if result.OnePercentLowFPS != 0 {
-		t.Fatalf("1%% low FPS = %.3f, want 0 when unavailable", result.OnePercentLowFPS)
+	if result.OnePercentLowFPS != nil {
+		t.Fatalf("1%% low FPS = %.3f, want null when unavailable", *result.OnePercentLowFPS)
 	}
 }
 
@@ -63,11 +64,11 @@ func TestAnalyzeKnownLowPercentiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if math.Abs(result.OnePercentLowFPS-39.995) > 0.01 {
-		t.Fatalf("1%% low FPS = %.3f, want about 39.995", result.OnePercentLowFPS)
+	if result.OnePercentLowFPS == nil || math.Abs(*result.OnePercentLowFPS-39.995) > 0.01 {
+		t.Fatalf("1%% low FPS = %v, want about 39.995", result.OnePercentLowFPS)
 	}
-	if math.Abs(result.PointOnePercentLowFPS-10) > 0.001 {
-		t.Fatalf("0.1%% low FPS = %.3f, want 10", result.PointOnePercentLowFPS)
+	if result.PointOnePercentLowFPS == nil || math.Abs(*result.PointOnePercentLowFPS-10) > 0.001 {
+		t.Fatalf("0.1%% low FPS = %v, want 10", result.PointOnePercentLowFPS)
 	}
 }
 
@@ -111,8 +112,31 @@ func TestAnalyzeRejectsNoMeaningfulSmallSampleLowPercentiles(t *testing.T) {
 	if result.PointOnePercentLowAvailable {
 		t.Fatal("0.1% low should be unavailable for 200 frames")
 	}
-	if result.PointOnePercentLowFPS != 0 {
-		t.Fatalf("0.1%% low FPS = %.3f, want 0", result.PointOnePercentLowFPS)
+	if result.PointOnePercentLowFPS != nil {
+		t.Fatalf("0.1%% low FPS = %.3f, want null", *result.PointOnePercentLowFPS)
+	}
+	if result.PointOnePercentLowReason == "" {
+		t.Fatal("0.1% low reason must be provided")
+	}
+}
+
+func TestAnalyzeNinetyNineFramesLowReasons(t *testing.T) {
+	values := make([]float64, 99)
+	for i := range values {
+		values[i] = 16.67
+	}
+	result, err := Analyze(values, 60, 1.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OnePercentLowAvailable {
+		t.Fatal("1% low should be unavailable below 100 frames")
+	}
+	if result.OnePercentLowFPS != nil {
+		t.Fatal("1% low FPS must be null below 100 frames")
+	}
+	if result.OnePercentLowReason == "" {
+		t.Fatal("1% low reason must be provided")
 	}
 }
 
@@ -179,14 +203,14 @@ func TestPercentileLowUsesFrameTimesNotInstantaneousFPS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if math.Abs(result.OnePercentLowFPS-9.0909) > 0.02 {
-		t.Fatalf("1%% low = %.3f FPS, want 9.091 FPS from percentile frame times", result.OnePercentLowFPS)
+	if result.OnePercentLowFPS == nil || math.Abs(*result.OnePercentLowFPS-9.0909) > 0.02 {
+		t.Fatalf("1%% low = %v FPS, want 9.091 FPS from percentile frame times", result.OnePercentLowFPS)
 	}
 	// The naive implementation averages the lowest 10 instantaneous FPS values:
 	// nine 10 FPS values and one 5 FPS value = 9.5 FPS.
 	// It must not be used because lows are percentiles of frame times.
 	naiveFPSAverage := (9*10.0 + 5.0) / 10.0
-	if math.Abs(result.OnePercentLowFPS-naiveFPSAverage) < 0.1 {
+	if result.OnePercentLowFPS != nil && math.Abs(*result.OnePercentLowFPS-naiveFPSAverage) < 0.1 {
 		t.Fatal("test did not distinguish frametime percentile from instantaneous-FPS percentile")
 	}
 }
@@ -219,5 +243,30 @@ func TestAnalyzeMonotonicRamp(t *testing.T) {
 	}
 	if result.FrameCount != 100 || result.MedianMS <= 0 {
 		t.Fatalf("unexpected ramp result: %+v", result)
+	}
+}
+
+func TestUnavailableLowFPSJSONIsNull(t *testing.T) {
+	values := make([]float64, 300)
+	for i := range values {
+		values[i] = 16.67
+	}
+	result, err := Analyze(values, 60, 1.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, `"0.1_percent_low_fps":null`) {
+		t.Fatalf("JSON did not encode unavailable 0.1%% low as null: %s", text)
+	}
+	if !strings.Contains(text, `"0.1_percent_low_available":false`) {
+		t.Fatalf("JSON missing unavailable 0.1%% low flag: %s", text)
+	}
+	if result.PointOnePercentLowReason == "" {
+		t.Fatal("0.1% low reason must be provided")
 	}
 }

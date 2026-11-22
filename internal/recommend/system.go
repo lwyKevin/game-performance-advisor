@@ -30,6 +30,19 @@ func RecommendSystem(machine system.Info, assessment analysis.SystemAssessment) 
 	}
 
 	switch assessment.Diagnosis {
+	case "Insufficient evidence for bottleneck diagnosis":
+		result.Upscaling = "Defer until CPU and GPU utilization are available"
+		result.FrameGeneration = "Defer: insufficient bottleneck evidence"
+		result.FGMultiplier = "None"
+		result.FGBenefit = "Unknown"
+		result.LatencyImpact = "Not estimated"
+		result.AssessmentReason = append(result.AssessmentReason,
+			"The snapshot did not meet the evidence-sufficiency gate",
+			"Frame-generation suitability is not inferred without usable CPU and GPU evidence")
+		result.PriorityActions = []string{
+			"Collect CPU and GPU utilization over at least 1 second",
+			"Retest before enabling frame generation",
+		}
 	case "GPU Limited":
 		result.Upscaling = "Enable DLSS/FSR/XeSS Quality first"
 		result.FrameGeneration = "Likely useful"

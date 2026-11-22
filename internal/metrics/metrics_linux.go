@@ -17,7 +17,8 @@ func Collect() (Snapshot, error) {
 	if err != nil {
 		return snapshot, err
 	}
-	time.Sleep(250 * time.Millisecond)
+	const measurementWindowSeconds = 1.0
+	time.Sleep(time.Second)
 	second, err := readCPU()
 	if err != nil {
 		return snapshot, err
@@ -26,6 +27,8 @@ func Collect() (Snapshot, error) {
 	deltaIdle := second.idle - first.idle
 	if deltaTotal > 0 {
 		snapshot.CPUPercent = float64(deltaTotal-deltaIdle) / float64(deltaTotal) * 100
+		snapshot.CPUAvailable = snapshot.CPUPercent >= 0 && snapshot.CPUPercent <= 100
+		snapshot.CPUMeasurementSeconds = measurementWindowSeconds
 	}
 
 	if data, err := os.ReadFile("/proc/meminfo"); err == nil {

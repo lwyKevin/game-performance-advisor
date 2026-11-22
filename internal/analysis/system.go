@@ -19,6 +19,11 @@ type SystemAssessment struct {
 }
 
 const (
+	// A near-zero CPU reading is treated as a measurement artifact rather than
+	// evidence that the system is idle. Candidate confidence requires at least
+	// one second of measurement and CPU utilization above 5%.
+	MinimumUsableCPUPercent = 5.0
+	MinimumCPUWindowSeconds = 1.0
 	// GPU utilization at or above 95% with CPU below 85% is treated as a
 	// candidate GPU-limited diagnosis. Both thresholds are transparent tunable
 	// defaults, not measurements of a specific game's engine.
@@ -37,6 +42,40 @@ const (
 func AnalyzeSystem(machine system.Info, snapshot metrics.Snapshot) SystemAssessment {
 	evidence := make([]string, 0, 6)
 	limitations := make([]string, 0, 3)
+
+	cpuMeasured := snapshot.CPUAvailable &&
+		snapshot.CPUMeasurementSeconds >= MinimumCPUWindowSeconds &&
+		snapshot.CPUPercent >= MinimumUsableCPUPercent &&
+		snapshot.CPUPercent <= 100
+
+	if !cpuMeasured {
+		switch {
+		case snapshot.CPUMeasurementSeconds < MinimumCPUWindowSeconds:
+			limitations = append(limitations, "CPU utilization was not measured over a 1-second or longer window")
+		case snapshot.CPUPercent <= 0:
+			limitations = append(limitations, "CPU utilization is 0%; it is not yet usable as evidence")
+		case snapshot.CPUPercent < MinimumUsableCPUPercent:
+			limitations = append(limitations, fmt.Sprintf("CPU utilization was %.0f%%; a near-zero reading is treated as a measurement artifact", snapshot.CPUPercent))
+		default:
+			limitations = append(limitations, "CPU utilization was outside the plausible 0-100% range")
+		}
+	}
+	if !snapshot.GPUAvailable {
+		limitations = append(limitations, "GPU utilization was not available; CPU-only diagnosis is not enabled")
+	}
+	if !cpuMeasured || !snapshot.GPUAvailable {
+		limitations = append(limitations, "Insufficient evidence for bottleneck diagnosis")
+		return SystemAssessment{
+			PerformanceScore: 0,
+			SmoothnessScore:  0,
+			FGReadiness:      0,
+			Confidence:       20,
+			Diagnosis:        "Insufficient evidence for bottleneck diagnosis",
+			Alternative:      "No bottleneck diagnosis available",
+			Evidence:         evidence,
+			Limitations:      limitations,
+		}
+	}
 	gpuLimiting := snapshot.GPUAvailable && snapshot.GPUPercent >= GPUUtilizationLimitedThreshold
 	cpuHigh := snapshot.CPUPercent >= CPUUtilizationLimitedThreshold
 	cpuModerate := snapshot.CPUPercent >= MixedAmbiguityCPUThreshold

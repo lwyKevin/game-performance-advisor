@@ -32,8 +32,16 @@ func run(args []string, stdout, stderr *os.File) error {
 		printUsage(stdout)
 		return nil
 	case "scan":
+		if len(args) > 1 && (args[1] == "-h" || args[1] == "--help" || args[1] == "help") {
+			printScanUsage(stdout)
+			return nil
+		}
 		return runScan(args[1:], stdout, stderr)
 	case "analyze":
+		if len(args) > 1 && (args[1] == "-h" || args[1] == "--help" || args[1] == "help") {
+			printAnalyzeUsage(stdout)
+			return nil
+		}
 		return runAnalyze(args[1:], stdout, stderr)
 	default:
 		printUsage(stderr)
@@ -56,10 +64,19 @@ func runScan(args []string, stdout, stderr *os.File) error {
 	}
 	assessment := frameanalysis.AnalyzeSystem(machine, snapshot)
 	recommendation := recommend.RecommendSystem(machine, assessment)
+	environment := collector.Environment()
+	if environment == "container (linux)" {
+		assessment.Limitations = append(assessment.Limitations,
+			"CPU/GPU counters reflect the container runtime, not the Windows host; run the Windows adapter outside Docker for host metrics.")
+	}
 	p := report.Report{
-		Command:  "scan",
-		Platform: runtime.GOOS,
-		System:   &report.SystemPayload{Machine: machine, Snapshot: snapshot, Assessment: assessment, Recommendation: recommendation},
+		Command:     "scan",
+		Platform:    runtime.GOOS,
+		Environment: environment,
+		System: &report.SystemPayload{
+			Machine: machine, Snapshot: snapshot, Assessment: assessment,
+			Recommendation: recommendation, Environment: environment,
+		},
 	}
 	return outputReport(p, *jsonOutput, stdout)
 }
@@ -117,4 +134,14 @@ func printUsage(w *os.File) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  game-performance-advisor scan [--json]")
 	fmt.Fprintln(w, "  game-performance-advisor analyze <frame-times.csv|json> [--target-fps 60] [--stutter-threshold 1.8] [--input-format auto|csv|json] [--json]")
+}
+
+func printAnalyzeUsage(w *os.File) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  game-performance-advisor analyze <frame-times.csv|json> [--target-fps 60] [--stutter-threshold 1.8] [--input-format auto|csv|json] [--json]")
+}
+
+func printScanUsage(w *os.File) {
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  game-performance-advisor scan [--json]")
 }

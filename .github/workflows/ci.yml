@@ -22,3 +22,9 @@ jobs:
         run: docker build -t gpa .
       - name: Run Docker default
         run: docker run --rm gpa
+      - name: Verify documented CLI scope
+        run: |
+          docker run --rm gpa --help
+          docker run --rm gpa analyze --help
+          docker run --rm gpa scan --help
+          ! docker run --rm gpa compare

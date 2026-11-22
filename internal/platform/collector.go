@@ -9,4 +9,5 @@ import (
 // inventory and one live snapshot, marking unavailable values explicitly.
 type Collector interface {
 	Collect() (system.Info, metrics.Snapshot, error)
+	Environment() string
 }

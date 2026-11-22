@@ -33,7 +33,14 @@ const (
 )
 
 func Recommend(a analysis.Result, targetFPS float64) Result {
-	smooth := a.AverageFPS >= targetFPS*0.98 && a.CoefficientVar <= 5 && a.OnePercentLowFPS >= targetFPS*0.9
+	oneLow := 0.0
+	if a.OnePercentLowFPS != nil {
+		oneLow = *a.OnePercentLowFPS
+	}
+	smooth := a.OnePercentLowFPS != nil &&
+		a.AverageFPS >= targetFPS*0.98 &&
+		a.CoefficientVar <= 5 &&
+		oneLow >= targetFPS*0.9
 	upscaling := "Consider Balanced or Quality if additional FPS or resolution is needed."
 	var fg, multiplier, latency string
 	var added float64
@@ -44,7 +51,11 @@ func Recommend(a analysis.Result, targetFPS float64) Result {
 	reason := ""
 	evidence := []string{}
 	evidence = append(evidence, fmt.Sprintf("Captured average: %.1f FPS", a.AverageFPS))
-	evidence = append(evidence, fmt.Sprintf("Captured 1%% low: %.1f FPS", a.OnePercentLowFPS))
+	if a.OnePercentLowFPS != nil {
+		evidence = append(evidence, fmt.Sprintf("Captured 1%% low: %.1f FPS", *a.OnePercentLowFPS))
+	} else {
+		evidence = append(evidence, "Captured 1% low: not available")
+	}
 	evidence = append(evidence, fmt.Sprintf("Captured frametime variance: %.1f%% CV", a.CoefficientVar))
 	evidence = append(evidence, fmt.Sprintf("Captured stutter share: %.1f%%", a.StutterPercent))
 

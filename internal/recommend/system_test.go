@@ -21,6 +21,18 @@ func TestSystemRecommendationCPULimited(t *testing.T) {
 	}
 }
 
+func TestSystemRecommendationInsufficientEvidence(t *testing.T) {
+	result := RecommendSystem(structSystemInfo(165), analysis.SystemAssessment{
+		Diagnosis: "Insufficient evidence for bottleneck diagnosis",
+	})
+	if result.FrameGeneration != "Defer: insufficient bottleneck evidence" {
+		t.Fatalf("frame generation = %q", result.FrameGeneration)
+	}
+	if result.FGMultiplier != "None" {
+		t.Fatalf("FG multiplier = %q, want None", result.FGMultiplier)
+	}
+}
+
 func structSystemInfo(refresh int) system.Info {
 	return system.Info{RefreshHz: refresh}
 }

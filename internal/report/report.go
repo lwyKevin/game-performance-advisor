@@ -12,10 +12,11 @@ import (
 )
 
 type Report struct {
-	Command  string         `json:"command"`
-	Platform string         `json:"platform"`
-	System   *SystemPayload `json:"system,omitempty"`
-	Frame    *FramePayload  `json:"frame,omitempty"`
+	Command     string         `json:"command"`
+	Platform    string         `json:"platform"`
+	Environment string         `json:"environment"`
+	System      *SystemPayload `json:"system,omitempty"`
+	Frame       *FramePayload  `json:"frame,omitempty"`
 }
 
 type SystemPayload struct {
@@ -23,6 +24,7 @@ type SystemPayload struct {
 	Snapshot       metrics.Snapshot          `json:"performance_snapshot"`
 	Assessment     analysis.SystemAssessment `json:"assessment"`
 	Recommendation recommend.SystemResult    `json:"recommendation"`
+	Environment    string                    `json:"environment"`
 }
 
 type FramePayload struct {
@@ -54,12 +56,12 @@ func terminalFrame(p *FramePayload) string {
 	fmt.Fprintf(&b, "Frames              %d\n", a.FrameCount)
 	fmt.Fprintf(&b, "Average FPS         %.1f\n", a.AverageFPS)
 	if a.OnePercentLowAvailable {
-		fmt.Fprintf(&b, "1%% Low FPS          %.1f\n", a.OnePercentLowFPS)
+		fmt.Fprintf(&b, "1%% Low FPS          %.1f\n", *a.OnePercentLowFPS)
 	} else {
 		fmt.Fprintln(&b, "1% Low FPS          Not available (<100 frames)")
 	}
 	if a.PointOnePercentLowAvailable {
-		fmt.Fprintf(&b, "0.1%% Low FPS        %.1f\n", a.PointOnePercentLowFPS)
+		fmt.Fprintf(&b, "0.1%% Low FPS        %.1f\n", *a.PointOnePercentLowFPS)
 	} else {
 		fmt.Fprintln(&b, "0.1% Low FPS        Not available (<1000 frames)")
 	}
@@ -74,6 +76,7 @@ func terminalSystem(p *SystemPayload) string {
 	m, s, a, rec := p.Machine, p.Snapshot, p.Assessment, p.Recommendation
 	var b strings.Builder
 	fmt.Fprintln(&b, "Game Performance Advisor - Hardware Scan")
+	fmt.Fprintf(&b, "Environment         %s\n", p.Environment)
 	fmt.Fprintf(&b, "\nSystem Summary\n")
 	fmt.Fprintf(&b, "  CPU                 %s\n", first(m.CPUModel, "Not detected"))
 	fmt.Fprintf(&b, "  GPU                 %s\n", strings.Join(m.GPUModels, ", "))

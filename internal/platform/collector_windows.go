@@ -13,6 +13,10 @@ func NewCollector() Collector {
 	return windowsCollector{}
 }
 
+func (windowsCollector) Environment() string {
+	return "windows-native"
+}
+
 func (windowsCollector) Collect() (system.Info, metrics.Snapshot, error) {
 	machine, err := system.Collect()
 	if err != nil {

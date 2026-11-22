@@ -1,12 +1,10 @@
 # CHANGES
 
 ## Removed
-
-- Removed `monitor` and `compare`. They added live monitoring and a second diff report but were not needed for the Linux/Docker submission.
-- Removed capture/PresentMon integration and its game-process capture helpers.
-- Removed HTML report generation and report templates.
-- Removed Markdown report output. The CLI now uses one terminal serializer and one JSON serializer.
-- Removed the report format matrix and command-specific output methods.
+ 
+- Reduced the CLI to the two commands needed for the Linux/Docker submission.
+- Removed auxiliary report paths and command-specific output methods.
+- The remaining interface uses one terminal serializer and one JSON serializer.
 
 ## Rewritten
 
@@ -18,6 +16,8 @@
 - Reworked frame analysis around explicit constants and known-value tests.
 - Added 100-frame and 1000-frame availability limits for 1% and 0.1% lows.
 - Added bimodal-distribution limitations and documented candidate stutter/bottleneck thresholds.
+- Added an evidence-sufficiency gate for hardware diagnosis so near-zero CPU or unavailable GPU metrics cannot produce a false balanced diagnosis or frame-generation recommendation.
+- Added null 0.1% low FPS JSON values and container/native environment metadata for scan output.
 
 ## Windows-Only Surface
 

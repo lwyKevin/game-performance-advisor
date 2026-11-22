@@ -47,6 +47,8 @@ func Collect() (Snapshot, error) {
 		return snapshot, fmt.Errorf("parse Windows metrics: %w", err)
 	}
 	snapshot.CPUPercent = result.CPU
+	snapshot.CPUAvailable = result.CPU >= 0 && result.CPU <= 100
+	snapshot.CPUMeasurementSeconds = 1
 	snapshot.GPUPercent = result.GPU
 	snapshot.GPUAvailable = result.GPUAvailable
 	snapshot.RAMUsedBytes = result.RAMUsed

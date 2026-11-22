@@ -11,10 +11,12 @@ type Result struct {
 	AverageMS                   float64  `json:"average_frametime_ms"`
 	AverageFPS                  float64  `json:"average_fps"`
 	MedianMS                    float64  `json:"median_ms"`
-	OnePercentLowFPS            float64  `json:"1_percent_low_fps"`
+	OnePercentLowFPS            *float64 `json:"1_percent_low_fps"`
 	OnePercentLowAvailable      bool     `json:"1_percent_low_available"`
-	PointOnePercentLowFPS       float64  `json:"0.1_percent_low_fps"`
+	OnePercentLowReason         string   `json:"1_percent_low_reason,omitempty"`
+	PointOnePercentLowFPS       *float64 `json:"0.1_percent_low_fps"`
 	PointOnePercentLowAvailable bool     `json:"0.1_percent_low_available"`
+	PointOnePercentLowReason    string   `json:"0.1_percent_low_reason,omitempty"`
 	StdDevMS                    float64  `json:"standard_deviation_ms"`
 	CoefficientVar              float64  `json:"coefficient_of_variation_percent"`
 	StutterPercent              float64  `json:"stutter_percent"`
@@ -95,6 +97,22 @@ func Analyze(frameTimes []float64, targetFPS float64, stutterThreshold float64) 
 	if pointOneAvailable {
 		pointOneLowFPS = slowAverageFPS(copied, 0.001)
 	}
+	var oneLowPointer *float64
+	oneLowReason := ""
+	if oneLowAvailable {
+		value := oneLowFPS
+		oneLowPointer = &value
+	} else {
+		oneLowReason = "not available: at least 100 frames are required"
+	}
+	var pointOnePointer *float64
+	pointOneReason := ""
+	if pointOneAvailable {
+		value := pointOneLowFPS
+		pointOnePointer = &value
+	} else {
+		pointOneReason = "not available: at least 1000 frames are required"
+	}
 
 	bottleneck, confidence, alternative, evidence := diagnose(average, targetFPS, cv, stutterPercent)
 	if cv >= 15 && stutterPercent < 1 {
@@ -114,10 +132,12 @@ func Analyze(frameTimes []float64, targetFPS float64, stutterThreshold float64) 
 		AverageMS:                   average,
 		AverageFPS:                  1000 / average,
 		MedianMS:                    median,
-		OnePercentLowFPS:            oneLowFPS,
+		OnePercentLowFPS:            oneLowPointer,
 		OnePercentLowAvailable:      oneLowAvailable,
-		PointOnePercentLowFPS:       pointOneLowFPS,
+		OnePercentLowReason:         oneLowReason,
+		PointOnePercentLowFPS:       pointOnePointer,
 		PointOnePercentLowAvailable: pointOneAvailable,
+		PointOnePercentLowReason:    pointOneReason,
 		StdDevMS:                    stdDev,
 		CoefficientVar:              cv,
 		StutterPercent:              stutterPercent,
