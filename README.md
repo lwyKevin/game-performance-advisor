@@ -103,6 +103,8 @@ can also analyze a converted file directly with a local Go build:
 go run .\cmd\game-performance-advisor analyze .\data\dst\limbus_frametimes.csv
 ```
 
+![Analyze with real example](docs/screenshots/docker-analyze-example.png)
+
 ## Analysis Rules
 
 The implementation deliberately does not percentile instantaneous FPS.
