@@ -161,7 +161,7 @@ Representative tools and checks used:
 - Git diff review to confirm that changes remained focused.
 - The actual Go entry point and package code, rather than assumptions, to verify command flags and platform behavior.
 
-Approximate time: no dedicated stopwatch was used, so elapsed time is not reported as a precise claim.
+Approximate time: around 2 days
 
 ## Development
 
