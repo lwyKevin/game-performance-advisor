@@ -13,6 +13,8 @@ docker build -t gpa .
 docker run --rm gpa
 ```
 
+![Default frame analysis output showing 60 FPS](docs/screenshots/docker-analyze-default.png)
+
 The default command analyzes `samples/smooth_60fps.csv`.
 
 Analyze another bundled sample:
@@ -39,6 +41,8 @@ On Linux, scan hardware explicitly:
 docker run --rm gpa scan
 go run ./cmd/game-performance-advisor scan
 ```
+
+![Hardware scan showing insufficient evidence and unavailable GPU metrics](docs/screenshots/docker-scan-insufficient-evidence.png)
 
 `scan` reports procfs/sysfs inventory and, where available, NVIDIA utilization. Missing GPU or display values are shown as unavailable rather than fabricated.
 The native `scan` adapter is currently supported on Linux and Windows. macOS is not currently a supported build target.
@@ -89,6 +93,8 @@ python .\presentmon_converter.py .\data\src\pmcap-LimbusCompany.exe-261121-22034
 
 docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/data" gpa analyze /data/data/dst/limbus_frametimes.csv
 ```
+
+![PresentMon conversion showing 70-column CSV reduced to 2 columns](docs/screenshots/presentmon-conversion-workflow.png)
 
 The helper filters invalid rows and reports how many frames were written. You
 can also analyze a converted file directly with a local Go build:
