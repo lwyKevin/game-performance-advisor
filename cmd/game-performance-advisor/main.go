@@ -2,27 +2,16 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"math"
 	"os"
-	"os/exec"
 	"runtime"
-	"sort"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 
 	frameanalysis "github.com/example/game-performance-advisor/internal/analysis"
-	"github.com/example/game-performance-advisor/internal/capture"
 	"github.com/example/game-performance-advisor/internal/input"
-	"github.com/example/game-performance-advisor/internal/metrics"
+	"github.com/example/game-performance-advisor/internal/platform"
 	"github.com/example/game-performance-advisor/internal/recommend"
 	"github.com/example/game-performance-advisor/internal/report"
-	"github.com/example/game-performance-advisor/internal/system"
 )
 
 func main() {
@@ -32,71 +21,20 @@ func main() {
 	}
 }
 
-func hardwareScanUnavailableMessage() string {
-	return "Hardware scan is only supported on Windows. However, you can still use the 'analyze' and 'compare' commands for frame-time analysis."
-}
-
-func isWindowsHardwarePlatform(goos string) bool {
-	return goos == "windows"
-}
-
-func runAppMode(stdout, stderr *os.File) error {
-	fmt.Fprintln(stdout, "Starting Game Performance Advisor... Generating report.")
-
-	const reportFilename = "GPA-Report.html"
-	if err := runScan([]string{"--html", reportFilename}, stdout, stderr); err != nil {
-		if runtime.GOOS != "windows" {
-			return err
-		}
-		fmt.Fprintln(stdout, "Report could not be generated. Press ENTER to exit.")
-		_, _ = fmt.Fscan(os.Stdin)
-		return err
-	}
-
-	if runtime.GOOS != "windows" {
-		fmt.Fprintf(stdout, "Report generated at %s.\n", reportFilename)
+func run(args []string, stdout, stderr *os.File) error {
+	if len(args) == 0 {
+		printUsage(stdout)
 		return nil
 	}
 
-	_ = exec.Command("cmd", "/c", "start", "", reportFilename).Run()
-	fmt.Fprintln(stdout, "Report opened in your browser. Press ENTER to exit.")
-	_, _ = fmt.Fscan(os.Stdin)
-	return nil
-}
-
-func run(args []string, stdout, stderr *os.File) error {
-	if len(args) == 0 {
-		if !isWindowsHardwarePlatform(runtime.GOOS) {
-			return errors.New(hardwareScanUnavailableMessage())
-		}
-		return runAppMode(stdout, stderr)
-	}
 	switch args[0] {
 	case "-h", "--help", "help":
 		printUsage(stdout)
 		return nil
 	case "scan":
-		if !isWindowsHardwarePlatform(runtime.GOOS) {
-			return errors.New(hardwareScanUnavailableMessage())
-		}
 		return runScan(args[1:], stdout, stderr)
-	case "monitor", "capture":
-		if args[0] == "capture" && len(args) > 1 &&
-			(args[1] == "-h" || args[1] == "--help" || args[1] == "help") {
-			printCaptureUsage(stdout)
-			return nil
-		}
-		if args[0] == "capture" {
-			return runFrameCapture(args[1:], stdout, stderr)
-		}
-		if !isWindowsHardwarePlatform(runtime.GOOS) {
-			return errors.New(hardwareScanUnavailableMessage())
-		}
-		return runMonitor(args[1:], stdout, stderr)
 	case "analyze":
 		return runAnalyze(args[1:], stdout, stderr)
-	case "compare":
-		return runCompare(args[1:], stdout, stderr)
 	default:
 		printUsage(stderr)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -107,436 +45,40 @@ func runScan(args []string, stdout, stderr *os.File) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	jsonOutput := fs.Bool("json", false, "print machine-readable JSON")
-	reportPath := fs.String("report", "", "write a Markdown report")
-	htmlPath := fs.String("html", "", "write an HTML report")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	machine, err := system.Collect()
-	if err != nil && !strings.Contains(err.Error(), "unsupported") {
-		return err
-	}
-	snapshot, err := metrics.Collect()
+	collector := platform.NewCollector()
+	machine, snapshot, err := collector.Collect()
 	if err != nil {
 		return err
 	}
-	result := report.SystemReport{
-		Machine:        machine,
-		Snapshot:       snapshot,
-		Assessment:     frameanalysis.AnalyzeSystem(machine, snapshot),
-		Recommendation: recommend.RecommendSystem(machine, frameanalysis.AnalyzeSystem(machine, snapshot)),
+	assessment := frameanalysis.AnalyzeSystem(machine, snapshot)
+	recommendation := recommend.RecommendSystem(machine, assessment)
+	p := report.Report{
+		Command:  "scan",
+		Platform: runtime.GOOS,
+		System:   &report.SystemPayload{Machine: machine, Snapshot: snapshot, Assessment: assessment, Recommendation: recommendation},
 	}
-	return outputSystemReport(result, *jsonOutput, *reportPath, *htmlPath, stdout)
-}
-
-type captureOptions struct {
-	Duration         int
-	Manual           bool
-	ProcessName      string
-	ProcessID        int
-	PresentMonPath   string
-	TargetFPS        float64
-	StutterThreshold float64
-	OutputCSV        string
-	JSONOutput       bool
-	ReportPath       string
-	HTMLPath         string
-}
-
-func parseCaptureArgs(args []string) (captureOptions, error) {
-	remaining := args
-	if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
-		durationText := remaining[0]
-		numberText := strings.TrimSuffix(strings.ToLower(durationText), "s")
-		duration, err := strconv.Atoi(numberText)
-		if err != nil {
-			return captureOptions{}, fmt.Errorf("invalid capture duration %q", durationText)
-		}
-		remaining = append([]string{"--duration", strconv.Itoa(duration)}, remaining[1:]...)
-	}
-
-	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	options := captureOptions{
-		Duration:         15,
-		TargetFPS:        60,
-		StutterThreshold: 1.8,
-	}
-	fs.IntVar(&options.Duration, "duration", 15, "capture duration in seconds")
-	fs.BoolVar(&options.Manual, "manual", false, "wait for ENTER instead of using a fixed duration")
-	fs.StringVar(&options.ProcessName, "process", "", "exact game process name")
-	fs.IntVar(&options.ProcessID, "pid", 0, "exact game process ID")
-	fs.StringVar(&options.PresentMonPath, "presentmon", "", "PresentMon executable path")
-	fs.Float64Var(&options.TargetFPS, "target-fps", 60, "target average FPS")
-	fs.Float64Var(&options.StutterThreshold, "stutter-threshold", 1.8, "stutter threshold")
-	fs.StringVar(&options.OutputCSV, "save", "", "normalized CSV output path")
-	fs.BoolVar(&options.JSONOutput, "json", false, "print JSON")
-	fs.StringVar(&options.ReportPath, "report", "", "write a Markdown report")
-	fs.StringVar(&options.HTMLPath, "html", "", "write an HTML report")
-
-	if err := fs.Parse(remaining); err != nil {
-		return captureOptions{}, err
-	}
-	if options.Duration < 1 || options.Duration > 300 {
-		return captureOptions{}, fmt.Errorf("duration must be between 1 and 300 seconds")
-	}
-	return options, nil
-}
-
-func runFrameCapture(args []string, stdout, stderr *os.File) error {
-	options, err := parseCaptureArgs(args)
-	if err != nil {
-		return err
-	}
-	duration := options.Duration
-	manualStop := options.Manual
-	processName := options.ProcessName
-	processID := options.ProcessID
-	presentMonPath := options.PresentMonPath
-	targetFPS := options.TargetFPS
-	stutterThreshold := options.StutterThreshold
-	outputCSV := options.OutputCSV
-	jsonOutput := options.JSONOutput
-	reportPath := options.ReportPath
-	htmlPath := options.HTMLPath
-
-	presentMonBinary, err := capture.DetectPresentMon(presentMonPath)
-	if err != nil {
-		return fallbackToScan(stdout, stderr, jsonOutput, reportPath, htmlPath)
-	}
-
-	if processName == "" && processID <= 0 {
-		fmt.Fprintln(stdout, "Waiting for gameplay process...")
-		fmt.Fprintln(stdout, "Launch or switch to your game. Press Ctrl+C to cancel.")
-		for {
-			snapshot, err := metrics.Collect()
-			if err != nil {
-				return fmt.Errorf("detect active games: %w", err)
-			}
-			candidates := capture.DetectCandidates(snapshot.Processes, snapshot.ForegroundProcess)
-			if len(candidates) == 0 {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			fmt.Fprintln(stdout, "\nDetected candidates:")
-			for i, candidate := range candidates {
-				if i >= 8 {
-					break
-				}
-				fmt.Fprintf(stdout, "%d. %s.exe (%d%%)\n", i+1, candidate.ProcessName, candidate.Confidence)
-				fmt.Fprintf(stdout, "   %s\n", candidate.Reason)
-			}
-			fmt.Fprintf(stdout, "\nDetected game: %s.exe\n", candidates[0].ProcessName)
-			fmt.Fprintf(stdout, "Confidence: %d%%\n", candidates[0].Confidence)
-			fmt.Fprint(stdout, "Continue? [Y/n]: ")
-			var response string
-			if _, err := fmt.Fscan(os.Stdin, &response); err != nil {
-				return fmt.Errorf("read confirmation: %w", err)
-			}
-			response = strings.TrimSpace(strings.ToLower(response))
-			if response == "n" || response == "no" {
-				fmt.Fprint(stdout, "Select process number: ")
-				var selection int
-				if _, err := fmt.Fscan(os.Stdin, &selection); err != nil {
-					return fmt.Errorf("read process selection: %w", err)
-				}
-				if selection < 1 || selection > len(candidates) {
-					return fmt.Errorf("invalid process selection %d", selection)
-				}
-				selected := candidates[selection-1]
-				processName = selected.ProcessName
-				processID = selected.ProcessID
-			} else {
-				processName = candidates[0].ProcessName
-				processID = candidates[0].ProcessID
-			}
-			break
-		}
-	}
-
-	if outputCSV == "" {
-		outputCSV = fmt.Sprintf("capture-%s.csv", time.Now().Format("20060102-150405"))
-	}
-	provider := capture.PresentMon{Binary: presentMonBinary}
-	var result capture.Result
-	if manualStop {
-		fmt.Fprintln(stdout, "\nCapture started.")
-		fmt.Fprintln(stdout, "Play normally, then press ENTER to stop capture.")
-		stop := make(chan struct{})
-		done := make(chan struct{})
-		var stopOnce sync.Once
-		stopCapture := func() {
-			stopOnce.Do(func() {
-				close(stop)
-				close(done)
-			})
-		}
-		go func() {
-			var ignored string
-			_, _ = fmt.Fscan(os.Stdin, &ignored)
-			stopCapture()
-		}()
-		result, err = provider.CaptureUntilStopped(processName, processID, outputCSV, stop)
-		stopCapture()
-		<-done
-		fmt.Fprintln(stdout, "Capture stopped.")
-	} else {
-		fmt.Fprintf(stdout, "\nCapture started for %s (%d seconds).\n", processName, duration)
-		fmt.Fprintln(stdout, "Play normally.")
-		result, err = provider.Capture(processName, processID, duration, outputCSV)
-	}
-	if err != nil {
-		return fallbackToScan(stdout, stderr, jsonOutput, reportPath, htmlPath)
-	}
-	analysisResult, err := frameanalysis.Analyze(result.FrameTimesMS, targetFPS, stutterThreshold)
-	if err != nil {
-		return err
-	}
-	recommendation := recommend.Recommend(analysisResult, targetFPS)
-	captureReport := report.CaptureReport{
-		Capture: result, Analysis: analysisResult,
-		Recommendation: recommendation, TargetFPS: targetFPS,
-	}
-	if jsonOutput {
-		data, err := report.CaptureJSON(captureReport)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(stdout, string(data))
-	} else {
-		fmt.Fprint(stdout, report.CaptureTerminal(captureReport))
-	}
-	if reportPath != "" {
-		if err := os.WriteFile(reportPath, []byte(report.CaptureMarkdown(captureReport)), 0644); err != nil {
-			return fmt.Errorf("write Markdown capture report %q: %w", reportPath, err)
-		}
-		if !jsonOutput {
-			fmt.Fprintf(stdout, "\nMarkdown report written to %s\n", reportPath)
-		}
-	}
-	if htmlPath != "" {
-		if err := os.WriteFile(htmlPath, []byte(report.CaptureHTML(captureReport)), 0644); err != nil {
-			return fmt.Errorf("write HTML capture report %q: %w", htmlPath, err)
-		}
-		if !jsonOutput {
-			fmt.Fprintf(stdout, "\nHTML report written to %s\n", htmlPath)
-		}
-	}
-	return nil
-}
-func fallbackToScan(stdout, stderr *os.File, jsonOutput bool, reportPath, htmlPath string) error {
-	fmt.Fprintln(stdout, "PresentMon not found or unavailable. Falling back to standard system scan...")
-	scanArgs := make([]string, 0, 6)
-	if jsonOutput {
-		scanArgs = append(scanArgs, "--json")
-	}
-	if reportPath != "" {
-		scanArgs = append(scanArgs, "--report", reportPath)
-	}
-	if htmlPath != "" {
-		scanArgs = append(scanArgs, "--html", htmlPath)
-	}
-	if err := runScan(scanArgs, stdout, stderr); err != nil {
-		fmt.Fprintf(stdout, "Standard system scan could not complete: %v\n", err)
-	}
-	return nil
-}
-
-func runMonitor(args []string, stdout, stderr *os.File) error {
-	fs := flag.NewFlagSet("monitor", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	duration := fs.Int("duration", 15, "monitor duration in seconds")
-	interval := fs.Int("interval", 2, "sample interval in seconds")
-	jsonOutput := fs.Bool("json", false, "print machine-readable JSON")
-	reportPath := fs.String("report", "", "write a Markdown report")
-	htmlPath := fs.String("html", "", "write an HTML report")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *duration < 1 || *duration > 300 {
-		return fmt.Errorf("duration must be between 1 and 300 seconds")
-	}
-	if *interval < 1 || *interval > 30 {
-		return fmt.Errorf("interval must be between 1 and 30 seconds")
-	}
-
-	machine, err := system.Collect()
-	if err != nil {
-		return err
-	}
-	samples := make([]metrics.Snapshot, 0)
-	for elapsed := 0; elapsed < *duration; elapsed += *interval {
-		snapshot, collectErr := metrics.Collect()
-		if collectErr != nil {
-			return collectErr
-		}
-		samples = append(samples, snapshot)
-		fmt.Fprintf(stdout, "Captured snapshot %d/%d\n", len(samples), (*duration+*interval-1)/(*interval))
-		if elapsed+*interval < *duration {
-			time.Sleep(time.Duration(*interval) * time.Second)
-		}
-	}
-	average := averageSnapshots(samples)
-	assessment := frameanalysis.AnalyzeSystem(machine, average)
-	result := report.SystemReport{
-		Machine: machine, Snapshot: average,
-		Assessment: assessment, Recommendation: recommend.RecommendSystem(machine, assessment),
-	}
-	return outputSystemReport(result, *jsonOutput, *reportPath, *htmlPath, stdout)
-}
-
-func averageSnapshots(samples []metrics.Snapshot) metrics.Snapshot {
-	result := metrics.Snapshot{}
-	if len(samples) == 0 {
-		return result
-	}
-	cpuValues := make([]float64, 0, len(samples))
-	gpuValues := make([]float64, 0, len(samples))
-	ramValues := make([]float64, 0, len(samples))
-	for _, sample := range samples {
-		result.CPUPercent += sample.CPUPercent
-		result.GPUPercent += sample.GPUPercent
-		result.RAMPercent += sample.RAMPercent
-		result.RAMUsedBytes += sample.RAMUsedBytes
-		cpuValues = append(cpuValues, sample.CPUPercent)
-		gpuValues = append(gpuValues, sample.GPUPercent)
-		ramValues = append(ramValues, sample.RAMPercent)
-		result.GPUAvailable = result.GPUAvailable || sample.GPUAvailable
-		if len(sample.GameProcesses) > 0 {
-			result.GameProcesses = append(result.GameProcesses, sample.GameProcesses...)
-		}
-		result.Processes = sample.Processes
-	}
-	count := float64(len(samples))
-	result.CPUPercent /= count
-	result.GPUPercent /= count
-	result.RAMPercent /= count
-	result.RAMUsedBytes /= uint64(count)
-	result.CPUP95Percent = percentileFloat(cpuValues, 0.95)
-	result.CPUPeakPercent = maximumFloat(cpuValues)
-	result.GPUP95Percent = percentileFloat(gpuValues, 0.95)
-	result.GPUPeakPercent = maximumFloat(gpuValues)
-	result.RAMP95Percent = percentileFloat(ramValues, 0.95)
-	result.RAMPeakPercent = maximumFloat(ramValues)
-	result.CapturedAt = time.Now()
-	return result
-}
-
-func percentileFloat(values []float64, percentile float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	sorted := append([]float64(nil), values...)
-	sort.Float64s(sorted)
-	index := int(math.Ceil(float64(len(sorted))*percentile)) - 1
-	if index < 0 {
-		index = 0
-	}
-	if index >= len(sorted) {
-		index = len(sorted) - 1
-	}
-	return sorted[index]
-}
-
-func maximumFloat(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	peak := values[0]
-	for _, value := range values[1:] {
-		if value > peak {
-			peak = value
-		}
-	}
-	return peak
-}
-
-func outputSystemReport(result report.SystemReport, jsonOutput bool, reportPath, htmlPath string, stdout *os.File) error {
-	if jsonOutput {
-		data, err := report.JSON(result)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(stdout, string(data))
-	} else {
-		fmt.Fprint(stdout, report.Terminal(result))
-	}
-	if reportPath != "" {
-		if err := os.WriteFile(reportPath, []byte(report.Markdown(result)), 0644); err != nil {
-			return fmt.Errorf("write Markdown report %q: %w", reportPath, err)
-		}
-		if !jsonOutput {
-			fmt.Fprintf(stdout, "\nMarkdown report written to %s\n", reportPath)
-		}
-	}
-	if htmlPath != "" {
-		if err := os.WriteFile(htmlPath, []byte(report.HTML(result)), 0644); err != nil {
-			return fmt.Errorf("write HTML report %q: %w", htmlPath, err)
-		}
-		if !jsonOutput {
-			fmt.Fprintf(stdout, "\nHTML report written to %s\n", htmlPath)
-		}
-	}
-	return nil
-}
-
-func printUsage(w *os.File) {
-	fmt.Fprintln(w, "Game Performance Advisor")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  game-performance-advisor scan [--json] [--report report.md] [--html report.html]")
-	fmt.Fprintln(w, "  game-performance-advisor monitor [--duration 15] [--interval 2]")
-	fmt.Fprintln(w, "  game-performance-advisor capture 15s [--process name] [--target-fps 60]")
-	fmt.Fprintln(w, "  game-performance-advisor compare before.csv after.csv [--report comparison.md] [--html comparison.html]")
-	fmt.Fprintln(w, "  game-performance-advisor analyze <frame-times.csv> [flags]  (advanced/import mode)")
-}
-
-func printCaptureUsage(w *os.File) {
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  game-performance-advisor capture")
-	fmt.Fprintln(w, "  game-performance-advisor capture 15s")
-	fmt.Fprintln(w, "  game-performance-advisor capture --manual")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Flags:")
-	fmt.Fprintln(w, "  --duration 15")
-	fmt.Fprintln(w, "  --manual")
-	fmt.Fprintln(w, "  --process <name>")
-	fmt.Fprintln(w, "  --pid <id>")
-	fmt.Fprintln(w, "  --presentmon <path>")
-	fmt.Fprintln(w, "  --target-fps 60")
-	fmt.Fprintln(w, "  --report report.md")
-	fmt.Fprintln(w, "  --html report.html")
-	fmt.Fprintln(w, "  --json")
-}
-
-func isCaptureDurationShorthand(value string) bool {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if len(value) < 2 || value[len(value)-1] != 's' {
-		return false
-	}
-	for _, char := range value[:len(value)-1] {
-		if char < '0' || char > '9' {
-			return false
-		}
-	}
-	return true
+	return outputReport(p, *jsonOutput, stdout)
 }
 
 func runAnalyze(args []string, stdout, stderr *os.File) error {
 	if len(args) < 1 {
 		return fmt.Errorf("CSV or JSON input is required for analyze")
 	}
+
 	fs := flag.NewFlagSet("analyze", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	targetFPS := fs.Float64("target-fps", 60, "target FPS")
 	threshold := fs.Float64("stutter-threshold", 1.8, "stutter threshold")
 	format := fs.String("input-format", "auto", "input format: auto, csv, json")
 	jsonOutput := fs.Bool("json", false, "print JSON")
-	reportPath := fs.String("report", "", "write a Markdown report")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
+
 	values, err := input.Read(args[0], *format)
 	if err != nil {
 		return err
@@ -546,146 +88,33 @@ func runAnalyze(args []string, stdout, stderr *os.File) error {
 		return err
 	}
 	recommendation := recommend.Recommend(result, *targetFPS)
-	payload := struct {
-		Source         string               `json:"source"`
-		TargetFPS      float64              `json:"target_fps"`
-		Analysis       frameanalysis.Result `json:"analysis"`
-		Recommendation recommend.Result     `json:"recommendation"`
-	}{args[0], *targetFPS, result, recommendation}
-	if *jsonOutput {
+	p := report.Report{
+		Command:  "analyze",
+		Platform: runtime.GOOS,
+		Frame: &report.FramePayload{
+			Source:         args[0],
+			TargetFPS:      *targetFPS,
+			Analysis:       result,
+			Recommendation: recommendation,
+		},
+	}
+	return outputReport(p, *jsonOutput, stdout)
+}
+
+func outputReport(p report.Report, jsonOutput bool, stdout *os.File) error {
+	if jsonOutput {
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
-		return encoder.Encode(payload)
+		return encoder.Encode(p)
 	}
-	fmt.Fprintf(stdout, "Game Performance Advisor - Advanced Frame Import\n\n")
-	fmt.Fprintf(stdout, "Source              %s\n", args[0])
-	fmt.Fprintf(stdout, "Frames              %d\n", result.FrameCount)
-	fmt.Fprintf(stdout, "Average FPS         %.1f\n", result.AverageFPS)
-	if result.OnePercentLowAvailable {
-		fmt.Fprintf(stdout, "1%% Low FPS          %.1f\n", result.OnePercentLowFPS)
-	} else {
-		fmt.Fprintln(stdout, "1% Low FPS          Not available (<100 frames)")
-	}
-	if result.PointOnePercentLowAvailable {
-		fmt.Fprintf(stdout, "0.1%% Low FPS        %.1f\n", result.PointOnePercentLowFPS)
-	} else {
-		fmt.Fprintln(stdout, "0.1% Low FPS        Not available (<1000 frames)")
-	}
-	fmt.Fprintf(stdout, "Frame Health        %d / 100\n", result.HealthScore)
-	fmt.Fprintf(stdout, "Diagnosis           %s (%d%% confidence)\n", result.Bottleneck, result.Confidence)
-	fmt.Fprintf(stdout, "FG Recommendation   %s (%s)\n", recommendation.FrameGeneration, recommendation.FGMultiplier)
-	fmt.Fprintf(stdout, "Latency Impact      %s\n", recommendation.LatencyRangeMS)
-	if *reportPath != "" {
-		var b strings.Builder
-		fmt.Fprintf(&b, "# Game Performance Advisor - Frame Import\n\n")
-		fmt.Fprintf(&b, "- Source: `%s`\n- Average FPS: %.1f\n", args[0], result.AverageFPS)
-		if result.OnePercentLowAvailable {
-			fmt.Fprintf(&b, "- 1%% Low: %.1f FPS\n", result.OnePercentLowFPS)
-		} else {
-			fmt.Fprintln(&b, "- 1% Low: Not available (<100 frames)")
-		}
-		if result.PointOnePercentLowAvailable {
-			fmt.Fprintf(&b, "- 0.1%% Low: %.1f FPS\n", result.PointOnePercentLowFPS)
-		} else {
-			fmt.Fprintln(&b, "- 0.1% Low: Not available (<1000 frames)")
-		}
-		fmt.Fprintf(&b, "- Frame Health: %d / 100\n- Diagnosis: %s\n",
-			result.HealthScore, result.Bottleneck)
-		fmt.Fprintf(&b, "- Frame Generation: %s (%s)\n", recommendation.FrameGeneration, recommendation.FGMultiplier)
-		if err := os.WriteFile(*reportPath, []byte(b.String()), 0644); err != nil {
-			return fmt.Errorf("write Markdown report %q: %w", *reportPath, err)
-		}
-		fmt.Fprintf(stdout, "\nMarkdown report written to %s\n", *reportPath)
-	}
+	fmt.Fprint(stdout, report.Terminal(p))
 	return nil
 }
 
-func runCompare(args []string, stdout, stderr *os.File) error {
-	fs := flag.NewFlagSet("compare", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	beforeLabel := fs.String("before-label", "Before optimization", "before capture label")
-	afterLabel := fs.String("after-label", "After optimization", "after capture label")
-	targetFPS := fs.Float64("target-fps", 60, "target average FPS")
-	reportPath := fs.String("report", "", "write a Markdown comparison")
-	htmlPath := fs.String("html", "", "write an HTML comparison")
-	positional := make([]string, 0, 2)
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--before-label":
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("--before-label requires a value")
-			}
-			*beforeLabel = args[i]
-		case "--after-label":
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("--after-label requires a value")
-			}
-			*afterLabel = args[i]
-		case "--target-fps":
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("--target-fps requires a value")
-			}
-			value, err := fmt.Sscanf(args[i], "%f", targetFPS)
-			if err != nil || value != 1 {
-				return fmt.Errorf("invalid target FPS %q", args[i])
-			}
-		case "--report":
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("--report requires a value")
-			}
-			*reportPath = args[i]
-		case "--html":
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("--html requires a value")
-			}
-			*htmlPath = args[i]
-		default:
-			positional = append(positional, args[i])
-		}
-	}
-	if len(positional) != 2 {
-		return fmt.Errorf("compare requires before.csv and after.csv")
-	}
-	beforeValues, err := input.Read(positional[0], "csv")
-	if err != nil {
-		return fmt.Errorf("read before capture: %w", err)
-	}
-	afterValues, err := input.Read(positional[1], "csv")
-	if err != nil {
-		return fmt.Errorf("read after capture: %w", err)
-	}
-	beforeAnalysis, err := frameanalysis.Analyze(beforeValues, *targetFPS, 1.8)
-	if err != nil {
-		return err
-	}
-	afterAnalysis, err := frameanalysis.Analyze(afterValues, *targetFPS, 1.8)
-	if err != nil {
-		return err
-	}
-	beforeRecommendation := recommend.Recommend(beforeAnalysis, *targetFPS)
-	afterRecommendation := recommend.Recommend(afterAnalysis, *targetFPS)
-	beforeCapture := capture.Result{GameName: *beforeLabel, FrameTimesMS: beforeValues, FrameCount: len(beforeValues)}
-	afterCapture := capture.Result{GameName: *afterLabel, FrameTimesMS: afterValues, FrameCount: len(afterValues)}
-	beforeReport := report.CaptureReport{Capture: beforeCapture, Analysis: beforeAnalysis, Recommendation: beforeRecommendation, TargetFPS: *targetFPS}
-	afterReport := report.CaptureReport{Capture: afterCapture, Analysis: afterAnalysis, Recommendation: afterRecommendation, TargetFPS: *targetFPS}
-	output := report.ComparisonMarkdown(beforeReport, afterReport)
-	fmt.Fprint(stdout, output)
-	if *reportPath != "" {
-		if err := os.WriteFile(*reportPath, []byte(output), 0644); err != nil {
-			return fmt.Errorf("write comparison report %q: %w", *reportPath, err)
-		}
-		fmt.Fprintf(stdout, "\nMarkdown report written to %s\n", *reportPath)
-	}
-	if *htmlPath != "" {
-		if err := os.WriteFile(*htmlPath, []byte(report.ComparisonHTML(beforeReport, afterReport)), 0644); err != nil {
-			return fmt.Errorf("write HTML comparison report %q: %w", *htmlPath, err)
-		}
-		fmt.Fprintf(stdout, "\nHTML report written to %s\n", *htmlPath)
-	}
-	return nil
+func printUsage(w *os.File) {
+	fmt.Fprintln(w, "Game Performance Advisor")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Usage:")
+	fmt.Fprintln(w, "  game-performance-advisor scan [--json]")
+	fmt.Fprintln(w, "  game-performance-advisor analyze <frame-times.csv|json> [--target-fps 60] [--stutter-threshold 1.8] [--input-format auto|csv|json] [--json]")
 }

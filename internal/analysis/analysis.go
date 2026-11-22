@@ -30,6 +30,19 @@ type Result struct {
 	StutterResistanceScore      int      `json:"stutter_resistance_score"`
 }
 
+const (
+	// StutterThresholdK defines a median-relative stutter heuristic. 1.8 is
+	// deliberately conservative: it counts clear pacing spikes but may miss
+	// very small regular alternation. It is a candidate for tuning.
+	StutterThresholdK = 1.8
+	// OnePercentFrameCountMinimum is the minimum capture size used for a
+	// reported 1% low. Below this size, the percentile is statistically weak.
+	OnePercentFrameCountMinimum = 100
+	// PointOnePercentFrameCountMinimum is the minimum capture size used for a
+	// reported 0.1% low. Below this size, the result represents only a few frames.
+	PointOnePercentFrameCountMinimum = 1000
+)
+
 // Analyze calculates percentiles by averaging the slowest 1%/0.1% of frames,
 // then converting their average frametime into frames per second.
 func Analyze(frameTimes []float64, targetFPS float64, stutterThreshold float64) (Result, error) {
@@ -72,12 +85,12 @@ func Analyze(frameTimes []float64, targetFPS float64, stutterThreshold float64) 
 	stutterPercent := float64(stutterCount) / float64(len(copied)) * 100
 
 	// copied is ascending, so take the slowest frames from the end.
-	oneLowAvailable := len(copied) >= 100
+	oneLowAvailable := len(copied) >= OnePercentFrameCountMinimum
 	oneLowFPS := 0.0
 	if oneLowAvailable {
 		oneLowFPS = slowAverageFPS(copied, 0.01)
 	}
-	pointOneAvailable := len(copied) >= 1000
+	pointOneAvailable := len(copied) >= PointOnePercentFrameCountMinimum
 	pointOneLowFPS := 0.0
 	if pointOneAvailable {
 		pointOneLowFPS = slowAverageFPS(copied, 0.001)

@@ -1,276 +1,143 @@
 # Game Performance Advisor
 
-Game Performance Advisor is a cross-platform Go CLI for analyzing game frame-time data. The primary workflow runs on Linux, macOS, and Windows, with Docker support so a reviewer can build and run it without installing Go.
+Game Performance Advisor is a cross-platform Go CLI for frame-time analysis. Linux and Docker are the primary supported workflow; Windows hardware inventory is a bonus adapter.
 
-GPA reads frametime CSV files and calculates average FPS, 1% and 0.1% lows, frame pacing, stutter percentage, frame health, and likely bottlenecks. It can also compare before-and-after recordings and suggest whether frame generation is suitable.
+GPA reads a simple CSV or JSON frame-time recording and reports average FPS, low FPS, stutter share, coefficient of variation, frame health, and a rule-based recommendation.
 
-## Quick Start: Docker
+## Quick Start: Linux and Docker
 
-Docker is the quickest way to run and review the project.
-
-Build the image:
+Build and run the default Docker result:
 
 ```bash
 docker build -t gpa .
-```
-
-Run the bundled sample:
-
-```bash
 docker run --rm gpa
 ```
 
-The default command analyzes `samples/smooth_60fps.csv` and prints the FPS statistics immediately.
-
-![Docker frame analysis](docs/screenshots/docker-frame-analysis.png)
+The default command analyzes `samples/smooth_60fps.csv`.
 
 Analyze another bundled sample:
 
 ```bash
 docker run --rm gpa analyze /samples/mixed_hitching.csv --target-fps 60
-docker run --rm gpa analyze /samples/cpu_stutter.csv --target-fps 60
 ```
 
-![Docker hitching analysis](docs/screenshots/docker-hitching.png)
-
-Mount a CSV from the host and analyze it:
+Mount a host CSV:
 
 ```bash
-docker run --rm -v "${PWD}:/data" gpa analyze /data/recording.csv --target-fps 144
+docker run --rm -v "$(pwd):/data" gpa analyze /data/recording.csv --target-fps 144
 ```
 
-The container uses a Linux binary. Frame-time analysis works in Docker on Linux, macOS, and Windows hosts.
+On Linux or macOS, scan hardware explicitly:
 
-Compare two bundled samples and write an HTML report into the current host directory:
-
-```cmd
-docker run --rm -v "%CD%:/data" gpa compare /samples/smooth_60fps.csv /samples/mixed_hitching.csv --target-fps 60 --html /data/comparison.html
+```bash
+docker run --rm gpa scan
+go run ./cmd/game-performance-advisor scan
 ```
 
-![Before/after Docker comparison](docs/screenshots/comparison.png)
+`scan` reports procfs/sysfs inventory and, where available, NVIDIA utilization. Missing GPU or display values are shown as unavailable rather than fabricated.
 
-The generated HTML report is available at [comparison.html](comparison.html).
+## CLI
 
-## Frame-Time CSV Format
+```text
+game-performance-advisor analyze <frame-times.csv|json> [--target-fps 60] [--stutter-threshold 1.8] [--input-format auto|csv|json] [--json]
+game-performance-advisor scan [--json]
+```
 
-GPA accepts CSV files with this two-column format:
+`analyze` is the primary product and works on Linux, macOS, and Windows.
+
+## CSV Format
 
 ```csv
 frame,frametime_ms
 1,16.67
 2,16.71
-3,16.69
 ```
 
-The `frametime_ms` column is required. The `frame` column is accepted but does not participate in the calculations.
+The `frametime_ms` column is required. Missing, blank, invalid, zero, and negative values are errors. Extra columns are allowed. Raw multi-column exports from CapFrameX or RTSS require conversion.
 
-Bundled samples are in [`samples/`](samples/). Tools that export frametime data, such as CapFrameX or RTSS, can produce compatible files after column export or conversion. GPA does not parse raw multi-column capture formats directly.
+## Analysis Rules
 
-CSV validation is strict: the `frametime_ms` header is required, every frametime row must contain a value, and values must parse as positive numbers. Missing, blank, invalid, zero, and negative frametime values return an error. Extra columns are allowed. GPA does not silently skip malformed rows.
+The implementation deliberately does not percentile instantaneous FPS.
 
-## CLI Commands
+- 1% low and 0.1% low sort frametimes, select the slowest `ceil(frame_count × 0.01)` or `ceil(frame_count × 0.001)` frames, average those frametimes, and convert `1000 / average_ms` to FPS.
+- 1% lows require at least 100 frames.
+- 0.1% lows require at least 1000 frames.
+- A frame is a stutter when it exceeds `1.8 × median frametime`. This is a candidate heuristic, not a hardware benchmark.
+- Widely split or bimodal distributions produce an ambiguity limitation rather than a clean diagnosis.
+- Coefficient of variation is standard deviation divided by mean frametime.
 
-### Analyze one recording
+For 1000 frames containing 999 frames at 16.67 ms and one 100 ms frame:
 
-```bash
-gpa analyze recording.csv --target-fps 60
-gpa analyze recording.csv --target-fps 144 --json
-gpa analyze recording.csv --target-fps 60 --report frame-analysis.md
-```
+- 1% low uses the slowest 10 frames: `(9 × 16.67 + 100) / 10 = 25.003 ms`, or approximately `39.995 FPS`.
+- 0.1% low uses the single slowest frame: `1000 / 100 = 10 FPS`.
 
-The `analyze` command supports:
+Known-value tests cover constant, ramp, bimodal, every-tenth-frame, and single-hitch distributions.
 
-- `--target-fps <fps>`: target average FPS, default `60`
-- `--stutter-threshold <ratio>`: stutter ratio, default `1.8`
-- `--input-format auto|csv|json`: input format, default `auto`
-- `--json`: print machine-readable JSON
-- `--report <file.md>`: write a Markdown report
+## Bottleneck and Recommendation Heuristics
 
-### Compare before and after recordings
+The system scan uses documented candidate thresholds:
 
-```bash
-gpa compare before.csv after.csv --target-fps 60
-gpa compare before.csv after.csv --target-fps 60 --report comparison.md --html comparison.html
-```
+- GPU-limited: GPU ≥95% and CPU <85%.
+- CPU-limited: CPU ≥92%.
+- Mixed/ambiguous: GPU ≥80% and CPU 55-84%.
 
-The `compare` command supports:
+These thresholds are tunable heuristics. The frame recommendation is tied to stable pacing, target FPS, and bottleneck evidence: CPU-heavy or unstable streams are not recommended for frame generation.
 
-- `--target-fps <fps>`: target average FPS
-- `--before-label <text>`: label for the before recording
-- `--after-label <text>`: label for the after recording
-- `--report <file.md>`: write a Markdown comparison
-- `--html <file.html>`: write an HTML comparison
-
-Running `gpa --help` prints the command summary.
-
-## How It Works
-
-The application is split into small Go packages:
-
-```text
-cmd/game-performance-advisor/
-  CLI entry point and command dispatch
-
-internal/input/
-  CSV and JSON frame-time parsing
-
-internal/analysis/
-  FPS, percentile low-FPS, stutter, and frame-health calculations
-
-internal/recommend/
-  Upscaling and frame-generation recommendations
-
-internal/report/
-  Terminal, JSON, Markdown, and HTML report rendering
-
-internal/system/
-  Windows and Linux system inventory
-
-internal/metrics/
-  Windows and Linux live metric collection
-```
-
-The `analyze` and `compare` commands read the supplied files and do not require live machine access. This is the cross-platform core of the project.
-
-## Scope and Verification
-
-The primary submission scope is frame-time CSV analysis and Docker execution. System inventory, monitoring, report formats, and Windows-only hardware support are existing supporting features, not the main reviewer demonstration.
-
-The frame-time calculations are verified with known values rather than only by ensuring the tests compile:
-
-- `100 × 16.67 ms` with no hitching has 60 FPS average, zero stutters, and 100/100 frame health under the smooth test thresholds.
-- `16 ms` repeated nine times with `50 ms` for the tenth frame has one stutter and a median of `16 ms`.
-- A 1000-frame dataset with nine slow `16.67 ms` frames and one `100 ms` frame has approximately 39.995 FPS 1% low and 10 FPS 0.1% low.
-- A 100-frame dataset alternating `16.67 ms` and `33.34 ms` has a 25.005 ms average and approximately 33.333% coefficient of variation.
-- The 1%/0.1% low calculations sort frametimes, take the slowest `ceil(frame_count × 0.01)` or `ceil(frame_count × 0.001)` frames, average those frametimes, and convert `1000 / average_ms` to FPS.
-- A stutter is counted when a frametime is greater than `1.8 ×` the median; the default threshold is configurable with `--stutter-threshold`.
-
-For the 1000-frame 1% low example, 999 frames are `16.67 ms` and one frame is `100 ms`. GPA sorts the frametimes and takes the slowest `ceil(1000 × 0.01) = 10` frames. It averages their frametimes: `(9 × 16.67 + 100) ÷ 10 = 25.003 ms`. It then converts that average to FPS: `1000 ÷ 25.003 = approximately 39.995 FPS`. For 0.1% low, it takes the slowest `ceil(1000 × 0.001) = 1` frame and converts `100 ms` to `10 FPS`.
-
-The stutter threshold is a configurable median-relative heuristic: a frame is counted as a stutter when it exceeds `1.8 × median`. The default is documented as a practical pacing heuristic rather than a calibrated hardware benchmark. Widely split or bimodal distributions produce a limitation warning because median-relative stutter counting can undercount sustained alternation.
-
-The 1% low result is reported only for captures with at least 100 frames. The 0.1% low result is reported only for captures with at least 1000 frames; shorter captures receive an explicit "not available" limitation instead of a statistically misleading percentile.
-
-These rules are implemented in [the analysis package](internal/analysis/analysis.go). The unit tests cover smooth data, 1%/0.1% low values, coefficient-of-variation frame pacing, one hitch, invalid input, and occasional hitch classification.
-
-## Live Demo
-
-Run the Docker workflow as the primary interview demonstration:
-
-```bash
-docker build -t gpa .
-docker run --rm gpa
-docker run --rm gpa analyze /samples/mixed_hitching.csv --target-fps 60
-docker run --rm gpa compare /samples/smooth_60fps.csv /samples/mixed_hitching.csv --target-fps 60
-```
-
-The final command shows a 60 FPS smooth recording compared with a 47.4 FPS recording containing 4.0% stutters. This live sequence demonstrates parsing, analysis, diagnosis, and before/after reporting without requiring Windows hardware access.
-
-## Design
-
-The frame-time workflow is independent of the operating system and can run in Docker:
+## Architecture
 
 ```mermaid
 flowchart LR
-    A[CSV or JSON input] --> B[Input package]
-    B --> C[Frame analysis]
-    C --> D[Frame-health diagnosis]
-    C --> E[Frame-generation recommendation]
-    D --> F[Terminal output]
-    E --> F
-    D --> G[Markdown or HTML report]
-    E --> G
+    CLI[cmd CLI] --> INPUT[CSV/JSON input]
+    INPUT --> ANALYSIS[Frame analysis]
+    ANALYSIS --> RECOMMEND[Recommendation rules]
+    RECOMMEND --> REPORT[One terminal/JSON report model]
+
+    CLI --> COLLECTOR{Platform Collector}
+    COLLECTOR -->|Linux procfs/sysfs| LINUX[Linux adapter]
+    COLLECTOR -->|Windows bonus| WINDOWS[Windows PowerShell adapter]
+    LINUX --> ANALYSIS
+    WINDOWS --> ANALYSIS
 ```
 
-The Windows-only workflow follows a separate hardware path:
+## Scope Trade-Off
 
-```mermaid
-flowchart LR
-    A[Windows executable] --> B[Inventory and metrics]
-    B --> C[System analysis]
-    C --> D[System recommendation]
-    D --> E[Terminal, JSON, Markdown, or HTML report]
-```
+The submission intentionally keeps only `scan` and `analyze`. `monitor`, `compare`, capture/PresentMon, HTML reports, and Markdown reports were removed because they add separate report paths and product surfaces without improving the Linux/Docker reviewer result.
 
-The CLI dispatches to these paths in [the application entry point](cmd/game-performance-advisor/main.go). The frame-time packages require no Windows APIs, while the hardware packages use Windows collection when available and return a clear fallback outside Windows.
+## AI-Assisted Workflow
 
-## AI-Assisted Development Workflow
+Tools: GitHub Copilot and direct repository inspection.
 
-This project was developed iteratively with GitHub Copilot:
+The project was developed in short, scoped passes:
 
-### How I directed Copilot
+1. Scope freeze: keep frame-time CSV analysis and remove unsupported capture claims.
+2. Cross-platform pass: stop blocking Linux and route frame analysis through Docker.
+3. Code review: replace an AI-suggested `fmt.Errorf(dynamicString)` issue with a constant error and rerun tests.
+4. Math review: identify that percentile logic must operate on frame times, not instantaneous FPS. I added known-value and bimodal tests rather than trusting passing calculations.
+5. Scope cut: remove monitor, compare, capture, HTML, and Markdown to leave the two runnable command paths.
 
-- **Scope freeze:** I told Copilot to remove PresentMon support claims and make the CSV contract explicit: "Frame analysis accepts CSV files with `frame,frametime_ms` columns." I also required it to change documentation only, verify `go test ./...`, and verify `docker run --rm gpa`.
-- **README clarity:** I asked for separate instructions for Windows users, developers, and Docker reviewers. I also required claims to be verified against `main.go`, `go.mod`, and the Dockerfile rather than invented.
-- **Cross-platform refactor:** I requested that `scan` and `monitor` use `runtime.GOOS` and fail gracefully outside Windows, while `analyze` and `compare` continue to work. I did not allow a rewrite of the frame-analysis code.
-- **Platform tests:** I asked for a test that can verify non-Windows fallback behavior without attempting Windows hardware collection.
-- **Architecture and submission evidence:** I requested Mermaid diagrams from copilot to make diagrams for this README
+Approach to AI output:
 
-### How I evaluated and corrected the output
+- Every README/platform claim was checked against source.
+- Generated code was accepted only after tests and Docker runs.
+- The AI's broad "Windows plus four commands" implementation was deliberately cut to the two-command submission.
+- Approximate time spent: about two days.
 
-1. **Checked source-of-truth files** - Copilot had to inspect `go.mod`, `main.go`, the system/metrics collectors, and the Dockerfile before making claims.
-2. **Rejected unsupported edits** - I required README-only changes during scope-freeze work and did not allow parser, dependency, test, sample, or Dockerfile changes outside the requested task.
-3. **Found and fixed verification failures** - A new fallback implementation initially failed Go vet due to a non-constant `fmt.Errorf` format. Copilot replaced it with `errors.New`, and both the Docker build and Go tests were rerun.
-4. **Verified Docker behavior** - I required the default container command to print the 60-FPS sample analysis and separately checked `scan` and `monitor` inside the Linux image.
-5. **Rejected technically passing but misleading claims** - One README draft said Linux hardware access was unavailable even though the code also has Linux `/proc` CPU, memory, process, and inventory collectors. The implementation could pass every test and still overstate the limitation, so I rewrote the wording to keep Windows diagnostics as the bonus feature and describe Docker as an intentionally limited Linux frame-analysis environment.
-6. **Validated diffs** - I reviewed changed files and did not retain unrelated worktree changes or assume that a prebuilt `.exe` existed.
-7. **Checked the analysis math independently** - I verified the formula for 1% and 0.1% low FPS, coefficient of variation, and the `median × 1.8` stutter threshold against known datasets, then added exact known-value assertions.
+## Windows Bonus
 
-The prompts were deliberately specific about scope, affected files, required behavior, and validation commands. Copilot's first plausible implementation was not accepted automatically; repository evidence and test/container output were used to correct it.
-
-Representative tools and checks used:
-
-- Go tests for frame parsing, analysis, reporting, recommendations, and CLI behavior.
-- Docker Desktop to build the Linux image and run the bundled sample.
-- Git diff review to confirm that changes remained focused.
-- The actual Go entry point and package code, rather than assumptions, to verify command flags and platform behavior.
-
-Approximate time: around 2 days
+Windows hardware collection remains available through `scan`. The PowerShell adapter communicates through stdin and is separate from the Linux adapter. The Windows executable is cross-built in CI and attached to tagged GitHub Releases.
 
 ## Development
 
-Requires Go. Run all unit tests:
-
 ```bash
 go test ./...
+go build ./cmd/game-performance-advisor
+docker build -t gpa .
+docker run --rm gpa
 ```
 
-Build a native executable:
+## Limitations
 
-```bash
-go build -trimpath -ldflags="-s -w" -o gpa ./cmd/game-performance-advisor
-```
-
-On Windows, build `gpa.exe`:
-
-```powershell
-go build -trimpath -ldflags="-s -w" -o gpa.exe .\cmd\game-performance-advisor
-```
-
-The Dockerfile uses a multi-stage build:
-
-1. A Go Linux image runs `go test ./...`.
-2. The same stage compiles a static Linux binary.
-3. A scratch image contains the binary and bundled samples.
-4. The default command runs `analyze` on the smooth 60-FPS sample.
-
-The Windows PowerShell collectors share a temporary-script helper that closes and removes the temporary script after normal success or collection failure. A focused unit test verifies temporary-file cleanup.
-
-## CI
-
-GitHub Actions builds and runs the project through Docker on every push and pull request. The Linux CI workflow runs `go test ./...`, builds the `gpa` image, and executes the default frame analysis.
-
-## Bonus: Windows Hardware Diagnostics
-
-On Windows, GPA can additionally provide live hardware diagnostics:
-
-```powershell
-.\gpa.exe scan
-.\gpa.exe monitor --duration 15 --interval 2
-```
-
-The `scan` command inspects Windows hardware and live utilization. The `monitor` command collects repeated utilization snapshots. These commands use Windows-specific inventory and metric collection and are only supported on Windows.
-
-Monitor reports average, peak, and p95 CPU, GPU, and memory utilization so short spikes are not hidden by averages alone.
-
-On Linux or macOS, `scan` and `monitor` return a helpful message directing you to `analyze` and `compare`. Frame-time analysis remains available without Windows-specific hardware access.
+- The stutter threshold and bottleneck thresholds are candidate heuristics.
+- Small captures do not report low FPS metrics when the frame count is insufficient.
+- Windows hardware metrics depend on the available WMI/PowerShell environment.
+- Linux GPU utilization depends on NVIDIA/ROCm tools or may remain unavailable.

@@ -25,6 +25,13 @@ type Result struct {
 	ExpectedVisualFPS  float64  `json:"expected_visual_fps"`
 }
 
+const (
+	// FrameGenerationTargetGapFPS: frame generation is considered only when
+	// base FPS is at least 10 FPS below target. This avoids recommending extra
+	// latency for a stream that is already close to its goal.
+	FrameGenerationTargetGapFPS = 10.0
+)
+
 func Recommend(a analysis.Result, targetFPS float64) Result {
 	smooth := a.AverageFPS >= targetFPS*0.98 && a.CoefficientVar <= 5 && a.OnePercentLowFPS >= targetFPS*0.9
 	upscaling := "Consider Balanced or Quality if additional FPS or resolution is needed."
@@ -48,7 +55,7 @@ func Recommend(a analysis.Result, targetFPS float64) Result {
 	isHitching := strings.Contains(a.Bottleneck, "Stutter")
 
 	switch {
-	case a.CoefficientVar >= 18 || a.StutterPercent >= 8:
+	case isSpikeHeavy || a.CoefficientVar >= 18 || a.StutterPercent >= 8:
 		fg = "Not recommended yet"
 		multiplier = "None"
 		latency = "Negative value if spikes remain; FG may amplify perceived stutter."

@@ -10,39 +10,27 @@ import (
 	"github.com/example/game-performance-advisor/internal/system"
 )
 
-func testReport() SystemReport {
-	machine := system.Info{
-		CPUModel: "Test CPU", GPUModels: []string{"Test GPU"}, RAMGB: 32,
-		Resolution: "2560x1440", RefreshHz: 165, OS: "Test OS",
+func TestTerminalAndJSONCoverBothCommands(t *testing.T) {
+	frame := Report{Command: "analyze", Platform: "linux", Frame: &FramePayload{
+		Source: "sample.csv", TargetFPS: 60,
+		Analysis:       analysis.Result{FrameCount: 300, AverageFPS: 60},
+		Recommendation: recommend.Result{FrameGeneration: "Not recommended"},
+	}}
+	if !strings.Contains(Terminal(frame), "Frame Analysis") {
+		t.Fatal("frame terminal report missing")
 	}
-	snapshot := metrics.Snapshot{CPUPercent: 48, GPUPercent: 96, GPUAvailable: true, RAMPercent: 55}
-	assessment := analysis.AnalyzeSystem(machine, snapshot)
-	return SystemReport{
-		Machine: machine, Snapshot: snapshot,
-		Assessment: assessment, Recommendation: recommend.RecommendSystem(machine, assessment),
-	}
-}
-
-func TestTerminalReportIncludesDiagnosis(t *testing.T) {
-	output := Terminal(testReport())
-	if !strings.Contains(output, "Primary Diagnosis") || !strings.Contains(output, "GPU Limited") {
-		t.Fatalf("terminal report is missing diagnosis:\n%s", output)
-	}
-}
-
-func TestMarkdownReportIncludesScores(t *testing.T) {
-	output := Markdown(testReport())
-	if !strings.Contains(output, "Performance score") ||
-		!strings.Contains(output, "Frame Generation readiness") {
-		t.Fatalf("Markdown report is missing scores:\n%s", output)
-	}
-}
-
-func TestHTMLReportIsPortfolioStyled(t *testing.T) {
-	output := HTML(testReport())
-	if !strings.Contains(output, "<!doctype html") ||
-		!strings.Contains(output, "GAME PERFORMANCE ADVISOR") {
-		t.Fatal("HTML report is missing expected structure")
+	encoded, err := JSON(frame)
+	if err != nil || !strings.Contains(string(encoded), `"command": "analyze"`) {
+		t.Fatalf("frame JSON report failed: %v", err)
 	}
 
+	scan := Report{Command: "scan", Platform: "linux", System: &SystemPayload{
+		Machine:        system.Info{CPUModel: "Test CPU"},
+		Snapshot:       metrics.Snapshot{CPUPercent: 20},
+		Assessment:     analysis.SystemAssessment{Diagnosis: "Balanced"},
+		Recommendation: recommend.SystemResult{FrameGeneration: "Optional"},
+	}}
+	if !strings.Contains(Terminal(scan), "Hardware Scan") {
+		t.Fatal("scan terminal report missing")
+	}
 }

@@ -1,0 +1,34 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Build Linux
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o game-performance-advisor-linux-amd64 ./cmd/game-performance-advisor
+      - name: Build Windows
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o game-performance-advisor-windows-amd64.exe ./cmd/game-performance-advisor
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            game-performance-advisor-linux-amd64
+            game-performance-advisor-windows-amd64.exe

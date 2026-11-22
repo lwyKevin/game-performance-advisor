@@ -165,3 +165,59 @@ func TestAnalyzeClassifiesOccasionalHitching(t *testing.T) {
 		t.Fatalf("bottleneck = %q, want Stutter / hitching", result.Bottleneck)
 	}
 }
+
+func TestPercentileLowUsesFrameTimesNotInstantaneousFPS(t *testing.T) {
+	values := make([]float64, 1000)
+	for i := range values {
+		values[i] = 16.67
+	}
+	for i := 990; i < 999; i++ {
+		values[i] = 100
+	}
+	values[999] = 200
+	result, err := Analyze(values, 60, 1.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(result.OnePercentLowFPS-9.0909) > 0.02 {
+		t.Fatalf("1%% low = %.3f FPS, want 9.091 FPS from percentile frame times", result.OnePercentLowFPS)
+	}
+	// The naive implementation averages the lowest 10 instantaneous FPS values:
+	// nine 10 FPS values and one 5 FPS value = 9.5 FPS.
+	// It must not be used because lows are percentiles of frame times.
+	naiveFPSAverage := (9*10.0 + 5.0) / 10.0
+	if math.Abs(result.OnePercentLowFPS-naiveFPSAverage) < 0.1 {
+		t.Fatal("test did not distinguish frametime percentile from instantaneous-FPS percentile")
+	}
+}
+
+func TestAnalyzeEveryTenthFrameBimodal(t *testing.T) {
+	values := make([]float64, 100)
+	for i := range values {
+		values[i] = 16.67
+		if i%10 == 9 {
+			values[i] = 50.01
+		}
+	}
+	result, err := Analyze(values, 60, 1.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.StutterCount != 10 {
+		t.Fatalf("stutter count = %d, want 10", result.StutterCount)
+	}
+}
+
+func TestAnalyzeMonotonicRamp(t *testing.T) {
+	values := make([]float64, 100)
+	for i := range values {
+		values[i] = 10 + float64(i)/10
+	}
+	result, err := Analyze(values, 60, 1.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FrameCount != 100 || result.MedianMS <= 0 {
+		t.Fatalf("unexpected ramp result: %+v", result)
+	}
+}

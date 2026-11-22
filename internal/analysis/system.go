@@ -18,14 +18,28 @@ type SystemAssessment struct {
 	Limitations      []string `json:"limitations"`
 }
 
+const (
+	// GPU utilization at or above 95% with CPU below 85% is treated as a
+	// candidate GPU-limited diagnosis. Both thresholds are transparent tunable
+	// defaults, not measurements of a specific game's engine.
+	GPUUtilizationLimitedThreshold     = 95.0
+	CPUUtilizationNotDominantThreshold = 85.0
+	// CPU utilization at or above 92% is the candidate CPU-limited threshold.
+	CPUUtilizationLimitedThreshold = 92.0
+	// When CPU and GPU are both in the 80-95% region, the diagnosis is
+	// intentionally ambiguous and remains low confidence.
+	MixedAmbiguityGPUThreshold = 80.0
+	MixedAmbiguityCPUThreshold = 55.0
+)
+
 // AnalyzeSystem produces transparent system-pressure diagnostics.
 // It deliberately avoids treating one metric as certainty.
 func AnalyzeSystem(machine system.Info, snapshot metrics.Snapshot) SystemAssessment {
 	evidence := make([]string, 0, 6)
 	limitations := make([]string, 0, 3)
-	gpuLimiting := snapshot.GPUAvailable && snapshot.GPUPercent >= 95
-	cpuHigh := snapshot.CPUPercent >= 85
-	cpuModerate := snapshot.CPUPercent >= 55
+	gpuLimiting := snapshot.GPUAvailable && snapshot.GPUPercent >= GPUUtilizationLimitedThreshold
+	cpuHigh := snapshot.CPUPercent >= CPUUtilizationLimitedThreshold
+	cpuModerate := snapshot.CPUPercent >= MixedAmbiguityCPUThreshold
 	memoryHigh := snapshot.RAMPercent >= 85
 
 	if snapshot.GPUAvailable {
@@ -50,7 +64,7 @@ func AnalyzeSystem(machine system.Info, snapshot metrics.Snapshot) SystemAssessm
 	alternative := "Mixed bottleneck"
 	confidence := 55
 	switch {
-	case gpuLimiting && !cpuHigh:
+	case gpuLimiting && snapshot.CPUPercent < CPUUtilizationNotDominantThreshold:
 		diagnosis = "GPU Limited"
 		confidence = 82
 		alternative = "GPU and CPU constrained"
@@ -62,6 +76,13 @@ func AnalyzeSystem(machine system.Info, snapshot metrics.Snapshot) SystemAssessm
 		diagnosis = "Memory Pressure"
 		confidence = 72
 		alternative = "CPU or storage pressure"
+	case snapshot.GPUAvailable &&
+		snapshot.GPUPercent >= MixedAmbiguityGPUThreshold &&
+		snapshot.CPUPercent >= MixedAmbiguityCPUThreshold &&
+		snapshot.CPUPercent < CPUUtilizationNotDominantThreshold:
+		diagnosis = "Mixed / ambiguous bottleneck"
+		confidence = 58
+		alternative = "GPU Limited or CPU / mixed pressure"
 	case cpuModerate && snapshot.GPUAvailable && snapshot.GPUPercent < 80:
 		diagnosis = "CPU / mixed bottleneck"
 		confidence = 68
