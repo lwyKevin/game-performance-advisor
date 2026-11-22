@@ -116,6 +116,53 @@ internal/metrics/
 
 The `analyze` and `compare` commands read the supplied files and do not require live machine access. This is the cross-platform core of the project.
 
+## Design
+
+The frame-time workflow is independent of the operating system and can run in Docker:
+
+```mermaid
+flowchart LR
+    A[CSV or JSON input] --> B[Input package]
+    B --> C[Frame analysis]
+    C --> D[Frame-health diagnosis]
+    C --> E[Frame-generation recommendation]
+    D --> F[Terminal output]
+    E --> F
+    D --> G[Markdown or HTML report]
+    E --> G
+```
+
+The Windows-only workflow follows a separate hardware path:
+
+```mermaid
+flowchart LR
+    A[Windows executable] --> B[Inventory and metrics]
+    B --> C[System analysis]
+    C --> D[System recommendation]
+    D --> E[Terminal, JSON, Markdown, or HTML report]
+```
+
+The CLI dispatches to these paths in [the application entry point](cmd/game-performance-advisor/main.go). The frame-time packages require no Windows APIs, while the hardware packages use Windows collection when available and return a clear fallback outside Windows.
+
+## AI-Assisted Development Workflow
+
+This project was developed iteratively with GitHub Copilot:
+
+1. **Scoped the product** - kept frame-time CSV analysis as the primary cross-platform workflow and treated Windows hardware diagnostics as an optional bonus.
+2. **Mapped the existing code** - inspected the CLI, input, analysis, recommendation, report, system, metrics, and Docker packages before changing behavior.
+3. **Implemented in small increments** - added non-Windows CLI guards, platform-focused tests, Docker-first documentation, and clarified CSV compatibility.
+4. **Verified behavior** - ran `go test ./...`, rebuilt the Docker image, ran the default sample, and checked the Docker fallback for `scan` and `monitor`.
+5. **Documented the result** - added Docker-first setup, command examples, architecture diagrams, Windows limitations, and this AI-assisted workflow.
+
+Representative tools and checks used:
+
+- Go tests for frame parsing, analysis, reporting, recommendations, and CLI behavior.
+- Docker Desktop to build the Linux image and run the bundled sample.
+- Git diff review to confirm that changes remained focused.
+- The actual Go entry point and package code, rather than assumptions, to verify command flags and platform behavior.
+
+Approximate time: no dedicated stopwatch was used, so elapsed time is not reported as a precise claim.
+
 ## Development
 
 Requires Go. Run all unit tests:
