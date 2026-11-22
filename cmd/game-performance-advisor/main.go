@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	frameanalysis "github.com/example/game-performance-advisor/internal/analysis"
@@ -25,10 +29,33 @@ func main() {
 	}
 }
 
+func runAppMode(stdout, stderr *os.File) error {
+	fmt.Fprintln(stdout, "Starting Game Performance Advisor... Generating report.")
+
+	const reportFilename = "GPA-Report.html"
+	if err := runScan([]string{"--html", reportFilename}, stdout, stderr); err != nil {
+		if runtime.GOOS != "windows" {
+			return err
+		}
+		fmt.Fprintln(stdout, "Report could not be generated. Press ENTER to exit.")
+		_, _ = fmt.Fscan(os.Stdin)
+		return err
+	}
+
+	if runtime.GOOS != "windows" {
+		fmt.Fprintf(stdout, "Report generated at %s.\n", reportFilename)
+		return nil
+	}
+
+	_ = exec.Command("cmd", "/c", "start", "", reportFilename).Run()
+	fmt.Fprintln(stdout, "Report opened in your browser. Press ENTER to exit.")
+	_, _ = fmt.Fscan(os.Stdin)
+	return nil
+}
+
 func run(args []string, stdout, stderr *os.File) error {
 	if len(args) == 0 {
-		printUsage(stderr)
-		return fmt.Errorf("scan, monitor, or analyze command is required")
+		return runAppMode(stdout, stderr)
 	}
 	switch args[0] {
 	case "-h", "--help", "help":
@@ -41,15 +68,6 @@ func run(args []string, stdout, stderr *os.File) error {
 			(args[1] == "-h" || args[1] == "--help" || args[1] == "help") {
 			printCaptureUsage(stdout)
 			return nil
-		}
-		if args[0] == "capture" && len(args) > 1 && isCaptureDurationShorthand(args[1]) {
-			durationText := strings.TrimSuffix(strings.ToLower(args[1]), "s")
-			duration, err := strconv.Atoi(durationText)
-			if err != nil {
-				return fmt.Errorf("invalid capture duration %q", args[1])
-			}
-			args = append([]string{"--duration", fmt.Sprintf("%d", duration)}, args[2:]...)
-			return runFrameCapture(args, stdout, stderr)
 		}
 		if args[0] == "capture" {
 			return runFrameCapture(args[1:], stdout, stderr)
@@ -92,28 +110,83 @@ func runScan(args []string, stdout, stderr *os.File) error {
 	return outputSystemReport(result, *jsonOutput, *reportPath, *htmlPath, stdout)
 }
 
-func runFrameCapture(args []string, stdout, stderr *os.File) error {
-	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	duration := fs.Int("duration", 15, "capture duration in seconds")
-	manualStop := fs.Bool("manual", false, "wait for ENTER instead of using a fixed duration")
-	processName := fs.String("process", "", "exact game process name")
-	processID := fs.Int("pid", 0, "exact game process ID")
-	presentMonPath := fs.String("presentmon", "", "PresentMon executable path")
-	targetFPS := fs.Float64("target-fps", 60, "target average FPS")
-	stutterThreshold := fs.Float64("stutter-threshold", 1.8, "stutter threshold")
-	outputCSV := fs.String("save", "", "normalized CSV output path")
-	jsonOutput := fs.Bool("json", false, "print JSON")
-	reportPath := fs.String("report", "", "write a Markdown report")
-	htmlPath := fs.String("html", "", "write an HTML report")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *duration < 1 || *duration > 300 {
-		return fmt.Errorf("duration must be between 1 and 300 seconds")
+type captureOptions struct {
+	Duration         int
+	Manual           bool
+	ProcessName      string
+	ProcessID        int
+	PresentMonPath   string
+	TargetFPS        float64
+	StutterThreshold float64
+	OutputCSV        string
+	JSONOutput       bool
+	ReportPath       string
+	HTMLPath         string
+}
+
+func parseCaptureArgs(args []string) (captureOptions, error) {
+	remaining := args
+	if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
+		durationText := remaining[0]
+		numberText := strings.TrimSuffix(strings.ToLower(durationText), "s")
+		duration, err := strconv.Atoi(numberText)
+		if err != nil {
+			return captureOptions{}, fmt.Errorf("invalid capture duration %q", durationText)
+		}
+		remaining = append([]string{"--duration", strconv.Itoa(duration)}, remaining[1:]...)
 	}
 
-	if *processName == "" && *processID <= 0 {
+	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	options := captureOptions{
+		Duration:         15,
+		TargetFPS:        60,
+		StutterThreshold: 1.8,
+	}
+	fs.IntVar(&options.Duration, "duration", 15, "capture duration in seconds")
+	fs.BoolVar(&options.Manual, "manual", false, "wait for ENTER instead of using a fixed duration")
+	fs.StringVar(&options.ProcessName, "process", "", "exact game process name")
+	fs.IntVar(&options.ProcessID, "pid", 0, "exact game process ID")
+	fs.StringVar(&options.PresentMonPath, "presentmon", "", "PresentMon executable path")
+	fs.Float64Var(&options.TargetFPS, "target-fps", 60, "target average FPS")
+	fs.Float64Var(&options.StutterThreshold, "stutter-threshold", 1.8, "stutter threshold")
+	fs.StringVar(&options.OutputCSV, "save", "", "normalized CSV output path")
+	fs.BoolVar(&options.JSONOutput, "json", false, "print JSON")
+	fs.StringVar(&options.ReportPath, "report", "", "write a Markdown report")
+	fs.StringVar(&options.HTMLPath, "html", "", "write an HTML report")
+
+	if err := fs.Parse(remaining); err != nil {
+		return captureOptions{}, err
+	}
+	if options.Duration < 1 || options.Duration > 300 {
+		return captureOptions{}, fmt.Errorf("duration must be between 1 and 300 seconds")
+	}
+	return options, nil
+}
+
+func runFrameCapture(args []string, stdout, stderr *os.File) error {
+	options, err := parseCaptureArgs(args)
+	if err != nil {
+		return err
+	}
+	duration := options.Duration
+	manualStop := options.Manual
+	processName := options.ProcessName
+	processID := options.ProcessID
+	presentMonPath := options.PresentMonPath
+	targetFPS := options.TargetFPS
+	stutterThreshold := options.StutterThreshold
+	outputCSV := options.OutputCSV
+	jsonOutput := options.JSONOutput
+	reportPath := options.ReportPath
+	htmlPath := options.HTMLPath
+
+	presentMonBinary, err := capture.DetectPresentMon(presentMonPath)
+	if err != nil {
+		return fallbackToScan(stdout, stderr, jsonOutput, reportPath, htmlPath)
+	}
+
+	if processName == "" && processID <= 0 {
 		fmt.Fprintln(stdout, "Waiting for gameplay process...")
 		fmt.Fprintln(stdout, "Launch or switch to your game. Press Ctrl+C to cancel.")
 		for {
@@ -152,57 +225,60 @@ func runFrameCapture(args []string, stdout, stderr *os.File) error {
 					return fmt.Errorf("invalid process selection %d", selection)
 				}
 				selected := candidates[selection-1]
-				*processName = selected.ProcessName
-				*processID = selected.ProcessID
+				processName = selected.ProcessName
+				processID = selected.ProcessID
 			} else {
-				*processName = candidates[0].ProcessName
-				*processID = candidates[0].ProcessID
+				processName = candidates[0].ProcessName
+				processID = candidates[0].ProcessID
 			}
 			break
 		}
 	}
 
-	presentMonBinary, err := capture.DetectPresentMon(*presentMonPath)
-	if err != nil {
-		return err
-	}
-	if *outputCSV == "" {
-		*outputCSV = fmt.Sprintf("capture-%s.csv", time.Now().Format("20060102-150405"))
+	if outputCSV == "" {
+		outputCSV = fmt.Sprintf("capture-%s.csv", time.Now().Format("20060102-150405"))
 	}
 	provider := capture.PresentMon{Binary: presentMonBinary}
 	var result capture.Result
-	if *manualStop {
+	if manualStop {
 		fmt.Fprintln(stdout, "\nCapture started.")
 		fmt.Fprintln(stdout, "Play normally, then press ENTER to stop capture.")
 		stop := make(chan struct{})
 		done := make(chan struct{})
+		var stopOnce sync.Once
+		stopCapture := func() {
+			stopOnce.Do(func() {
+				close(stop)
+				close(done)
+			})
+		}
 		go func() {
 			var ignored string
 			_, _ = fmt.Fscan(os.Stdin, &ignored)
-			close(stop)
-			close(done)
+			stopCapture()
 		}()
-		result, err = provider.CaptureUntilStopped(*processName, *processID, *outputCSV, stop)
+		result, err = provider.CaptureUntilStopped(processName, processID, outputCSV, stop)
+		stopCapture()
 		<-done
 		fmt.Fprintln(stdout, "Capture stopped.")
 	} else {
-		fmt.Fprintf(stdout, "\nCapture started for %s (%d seconds).\n", *processName, *duration)
+		fmt.Fprintf(stdout, "\nCapture started for %s (%d seconds).\n", processName, duration)
 		fmt.Fprintln(stdout, "Play normally.")
-		result, err = provider.Capture(*processName, *processID, *duration, *outputCSV)
+		result, err = provider.Capture(processName, processID, duration, outputCSV)
 	}
+	if err != nil {
+		return fallbackToScan(stdout, stderr, jsonOutput, reportPath, htmlPath)
+	}
+	analysisResult, err := frameanalysis.Analyze(result.FrameTimesMS, targetFPS, stutterThreshold)
 	if err != nil {
 		return err
 	}
-	analysisResult, err := frameanalysis.Analyze(result.FrameTimesMS, *targetFPS, *stutterThreshold)
-	if err != nil {
-		return err
-	}
-	recommendation := recommend.Recommend(analysisResult, *targetFPS)
+	recommendation := recommend.Recommend(analysisResult, targetFPS)
 	captureReport := report.CaptureReport{
 		Capture: result, Analysis: analysisResult,
-		Recommendation: recommendation, TargetFPS: *targetFPS,
+		Recommendation: recommendation, TargetFPS: targetFPS,
 	}
-	if *jsonOutput {
+	if jsonOutput {
 		data, err := report.CaptureJSON(captureReport)
 		if err != nil {
 			return err
@@ -211,24 +287,42 @@ func runFrameCapture(args []string, stdout, stderr *os.File) error {
 	} else {
 		fmt.Fprint(stdout, report.CaptureTerminal(captureReport))
 	}
-	if *reportPath != "" {
-		if err := os.WriteFile(*reportPath, []byte(report.CaptureMarkdown(captureReport)), 0644); err != nil {
-			return fmt.Errorf("write Markdown capture report %q: %w", *reportPath, err)
+	if reportPath != "" {
+		if err := os.WriteFile(reportPath, []byte(report.CaptureMarkdown(captureReport)), 0644); err != nil {
+			return fmt.Errorf("write Markdown capture report %q: %w", reportPath, err)
 		}
-		if !*jsonOutput {
-			fmt.Fprintf(stdout, "\nMarkdown report written to %s\n", *reportPath)
+		if !jsonOutput {
+			fmt.Fprintf(stdout, "\nMarkdown report written to %s\n", reportPath)
 		}
 	}
-	if *htmlPath != "" {
-		if err := os.WriteFile(*htmlPath, []byte(report.CaptureHTML(captureReport)), 0644); err != nil {
-			return fmt.Errorf("write HTML capture report %q: %w", *htmlPath, err)
+	if htmlPath != "" {
+		if err := os.WriteFile(htmlPath, []byte(report.CaptureHTML(captureReport)), 0644); err != nil {
+			return fmt.Errorf("write HTML capture report %q: %w", htmlPath, err)
 		}
-		if !*jsonOutput {
-			fmt.Fprintf(stdout, "\nHTML report written to %s\n", *htmlPath)
+		if !jsonOutput {
+			fmt.Fprintf(stdout, "\nHTML report written to %s\n", htmlPath)
 		}
 	}
 	return nil
 }
+func fallbackToScan(stdout, stderr *os.File, jsonOutput bool, reportPath, htmlPath string) error {
+	fmt.Fprintln(stdout, "PresentMon not found or unavailable. Falling back to standard system scan...")
+	scanArgs := make([]string, 0, 6)
+	if jsonOutput {
+		scanArgs = append(scanArgs, "--json")
+	}
+	if reportPath != "" {
+		scanArgs = append(scanArgs, "--report", reportPath)
+	}
+	if htmlPath != "" {
+		scanArgs = append(scanArgs, "--html", htmlPath)
+	}
+	if err := runScan(scanArgs, stdout, stderr); err != nil {
+		fmt.Fprintf(stdout, "Standard system scan could not complete: %v\n", err)
+	}
+	return nil
+}
+
 func runMonitor(args []string, stdout, stderr *os.File) error {
 	fs := flag.NewFlagSet("monitor", flag.ContinueOnError)
 	fs.SetOutput(stderr)

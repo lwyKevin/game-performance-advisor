@@ -2,15 +2,21 @@ package metrics
 
 import (
 	"bytes"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
+
+//go:embed collector.ps1
+var embeddedAssets embed.FS
 
 var writeRawCollectorLog = func(raw []byte, script string) {
 	if os.Getenv("GPA_DEBUG_METRICS") == "" {
@@ -122,7 +128,10 @@ func mergeCollectorObjects(objects []json.RawMessage) ([]byte, error) {
 func Collect() (Snapshot, error) {
 	snapshot := Snapshot{CapturedAt: time.Now()}
 	if runtime.GOOS != "windows" {
-		return snapshot, fmt.Errorf("live Windows metrics are unavailable on %s", runtime.GOOS)
+		if runtime.GOOS == "linux" {
+			return collectLinux(snapshot)
+		}
+		return snapshot, fmt.Errorf("live metrics are unavailable on %s", runtime.GOOS)
 	}
 	shell, err := exec.LookPath("powershell.exe")
 	if err != nil {
@@ -131,79 +140,25 @@ func Collect() (Snapshot, error) {
 	if err != nil {
 		return snapshot, fmt.Errorf("PowerShell was not found")
 	}
-	script := `
-$ErrorActionPreference='SilentlyContinue'
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-Start-Sleep -Milliseconds 250
-$cpu=0
-try {
-  $cpuCounter=Get-Counter '\Processor(_Total)\% Processor Time' -ErrorAction Stop
-  if ($cpuCounter -and $cpuCounter.CounterSamples.Count -gt 0) {
-    $cpu=[math]::Round([double]$cpuCounter.CounterSamples[0].CookedValue,1)
-  }
-} catch {}
-$ramUsed=[uint64]0
-$ramPercent=0
-try {
-  $os=Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
-  $ramUsed=[uint64](($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)*1024)
-  if ($os.TotalVisibleMemorySize -gt 0) {
-    $ramPercent=[math]::Round((1-($os.FreePhysicalMemory/$os.TotalVisibleMemorySize))*100,1)
-  }
-} catch {}
-$processes=@()
-try {
-  foreach ($process in (Get-Process -ErrorAction Stop | Sort-Object -Property CPU -Descending | Select-Object -First 12)) {
-    $processCpu=0
-    if ($null -ne $process.CPU) { $processCpu=[math]::Round([double]$process.CPU,1) }
-    $memoryMb=[math]::Round([double]$process.WorkingSet64/1MB,1)
-    $executable=''
-    try { $executable=$process.Path } catch {}
-    $processes += [ordered]@{
-      name=[string]$process.ProcessName
-      pid=[int]$process.Id
-      cpu_percent=[double]$processCpu
-      memory_mb=[double]$memoryMb
-      executable=[string]$executable
-    }
-  }
-} catch {}
-$foreground=''
-try {
-  $signature='using System; using System.Runtime.InteropServices; public class GPAWindow { [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId); }'
-  if (-not ('GPAWindow' -as [type])) { Add-Type -TypeDefinition $signature -ErrorAction Stop }
-  $window=[GPAWindow]::GetForegroundWindow()
-  $windowProcessId=0
-  [GPAWindow]::GetWindowThreadProcessId($window,[ref]$windowProcessId) | Out-Null
-  if ($windowProcessId -gt 0) {
-    $foregroundProcess=Get-Process -Id $windowProcessId -ErrorAction SilentlyContinue
-    if ($foregroundProcess) { $foreground=$foregroundProcess.ProcessName }
-  }
-} catch {}
-$gpu=0.0
-$gpuAvailable=$false
-try {
-  $nvidia=Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
-  if ($nvidia) {
-    $gpuText=& $nvidia.Source --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>$null
-    if ($gpuText) {
-      $gpu=[math]::Round([double]($gpuText | Select-Object -First 1),1)
-      $gpuAvailable=$true
-    }
-  }
-} catch {}
-[ordered]@{
-  cpu=[double]$cpu
-  ram_used=[uint64]$ramUsed
-  ram_percent=[double]$ramPercent
-  processes=$processes
-  gpu=[double]$gpu
-  gpu_available=[bool]$gpuAvailable
-  foreground_process=[string]$foreground
-} | ConvertTo-Json -Compress -Depth 6
-`
-	output, err := exec.Command(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script).Output()
-	writeRawCollectorLog(output, script)
+	script, err := embeddedAssets.ReadFile("collector.ps1")
+	if err != nil {
+		return snapshot, fmt.Errorf("read embedded Windows metrics script: %w", err)
+	}
+	temp, err := os.CreateTemp("", "gpa-metrics-*.ps1")
+	if err != nil {
+		return snapshot, fmt.Errorf("create temporary metrics script: %w", err)
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if _, err := temp.Write(script); err != nil {
+		temp.Close()
+		return snapshot, fmt.Errorf("write temporary metrics script: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return snapshot, fmt.Errorf("close temporary metrics script: %w", err)
+	}
+	output, err := exec.Command(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", tempPath).Output()
+	writeRawCollectorLog(output, string(script))
 	if err != nil {
 		return snapshot, fmt.Errorf("collect live Windows metrics: %w", err)
 	}
@@ -229,6 +184,116 @@ try {
 	snapshot.ForegroundProcess = result.ForegroundProcess
 	snapshot.GameProcesses = detectGames(result.Processes)
 	return snapshot, nil
+}
+
+func collectLinux(snapshot Snapshot) (Snapshot, error) {
+	firstCPU, err := readLinuxCPU()
+	if err != nil {
+		return snapshot, fmt.Errorf("read Linux CPU metrics: %w", err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	secondCPU, err := readLinuxCPU()
+	if err != nil {
+		return snapshot, fmt.Errorf("read Linux CPU metrics: %w", err)
+	}
+	totalDelta := secondCPU.total - firstCPU.total
+	idleDelta := secondCPU.idle - firstCPU.idle
+	if totalDelta > 0 {
+		snapshot.CPUPercent = float64(totalDelta-idleDelta) / float64(totalDelta) * 100
+	}
+	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
+		var total, available uint64
+		for _, line := range strings.Split(string(data), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			value, parseErr := strconv.ParseUint(fields[1], 10, 64)
+			if parseErr != nil {
+				continue
+			}
+			switch fields[0] {
+			case "MemTotal:":
+				total = value * 1024
+			case "MemAvailable:":
+				available = value * 1024
+			}
+		}
+		if total > 0 {
+			snapshot.RAMUsedBytes = total - available
+			snapshot.RAMPercent = float64(snapshot.RAMUsedBytes) / float64(total) * 100
+		}
+	}
+	snapshot.Processes = linuxProcesses()
+	snapshot.GameProcesses = detectGames(snapshot.Processes)
+	return snapshot, nil
+}
+
+type linuxCPU struct {
+	total uint64
+	idle  uint64
+}
+
+func readLinuxCPU() (linuxCPU, error) {
+	data, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return linuxCPU{}, err
+	}
+	fields := strings.Fields(strings.SplitN(string(data), "\n", 2)[0])
+	if len(fields) < 5 || fields[0] != "cpu" {
+		return linuxCPU{}, fmt.Errorf("invalid /proc/stat format")
+	}
+	var result linuxCPU
+	for i, field := range fields[1:] {
+		value, err := strconv.ParseUint(field, 10, 64)
+		if err != nil {
+			return linuxCPU{}, err
+		}
+		result.total += value
+		if i == 3 {
+			result.idle = value
+		}
+	}
+	return result, nil
+}
+
+func linuxProcesses() []Process {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	processes := make([]Process, 0, 12)
+	pageSize := int64(os.Getpagesize())
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || !entry.IsDir() {
+			continue
+		}
+		nameData, err := os.ReadFile("/proc/" + entry.Name() + "/comm")
+		if err != nil {
+			continue
+		}
+		process := Process{Name: strings.TrimSpace(string(nameData)), PID: pid}
+		if statm, err := os.ReadFile("/proc/" + entry.Name() + "/statm"); err == nil {
+			fields := strings.Fields(string(statm))
+			if len(fields) > 1 {
+				if resident, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+					process.MemoryMB = float64(resident*pageSize) / (1024 * 1024)
+				}
+			}
+		}
+		if executable, err := os.Readlink("/proc/" + entry.Name() + "/exe"); err == nil {
+			process.Executable = executable
+		}
+		processes = append(processes, process)
+	}
+	sort.Slice(processes, func(i, j int) bool {
+		return processes[i].MemoryMB > processes[j].MemoryMB
+	})
+	if len(processes) > 12 {
+		processes = processes[:12]
+	}
+	return processes
 }
 
 func detectGames(processes []Process) []Process {

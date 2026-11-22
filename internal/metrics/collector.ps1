@@ -1,4 +1,3 @@
-
 $ErrorActionPreference='SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 Start-Sleep -Milliseconds 250

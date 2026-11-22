@@ -1,0 +1,10 @@
+# Compiled binaries
+*.exe
+/game-performance-advisor
+
+# Local environment captures (not part of the submission)
+goenv.json
+
+# OS junk
+.DS_Store
+Thumbs.db

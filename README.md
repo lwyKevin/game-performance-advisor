@@ -1,228 +1,94 @@
 # Game Performance Advisor
 
-Game Performance Advisor is a Windows-first systems diagnostics utility for gamers,
-benchmarkers, and esports operators. It inspects hardware and live resource pressure,
-identifies likely GPU/CPU/mixed bottlenecks, and produces actionable recommendations
-for upscaling and frame generation.
+**The primary product is the Windows desktop app (`gpa.exe`).** It scans live PC hardware and opens a professional HTML report. Docker and CSV analysis are for platform-independent testing and advanced users with existing frame-time data.
 
-The tool is diagnostic only. It does not hook games, inject code, overlay the desktop,
-modify frames, or communicate with a graphics API.
+*"The primary product is the Windows desktop app (`gpa.exe`). Docker and CSV analysis are for platform-independent testing and advanced users with existing frame-time data."*
 
-## Screenshots
+There is no installer and no need to install Go, Python, or external scripts for the Windows app. Double-clicking `gpa.exe` requires no CSV and does not expose any of the internal data collection details to the user.
 
-The portfolio screenshot is an SVG terminal demonstration:
+## Quick Start
 
-![Terminal system scan](docs/images/terminal-scan.svg)
+**Option 1: Double-Click (Easiest)**
 
-Generate a live HTML capture report to get the portfolio-ready frame chart and
-recommendation cards:
+Simply double-click `gpa.exe`. It will scan your PC, generate a dashboard, and automatically open it in your web browser.
 
-```powershell
-game-performance-advisor.exe capture 15s --html benchmark-capture.html
-```
+**Option 2: Command Line (Advanced)**
 
-## Benchmark example
+If you want to capture live frames or analyze CSVs, use the terminal:
 
-Example of a real before/after capture comparison:
-
-| Metric | Before | After Quality Upscaling | Change |
-|---|---:|---:|---:|
-| Average FPS | 57.2 | 71.8 | +14.6 |
-| 1% Low FPS | 42.4 | 56.1 | +13.7 |
-| 0.1% Low FPS | 28.1 | 38.7 | +10.6 |
-| Stutters | 11.2% | 6.4% | -4.8 pp |
-
-The illustrative values show the report shape. They are not a claim about any
-specific GPU or game. Real recommendations should use actual PresentMon captures.
-
-## Primary workflow
+1. Download `gpa.exe` from the Releases page.
+2. Open PowerShell or Command Prompt.
+3. Run:
 
 ```powershell
-game-performance-advisor.exe scan
+.\gpa.exe scan --html report.html
 ```
 
-Example:
+You can also use:
+
+```powershell
+.\gpa.exe scan
+.\gpa.exe scan --report scan.md --html scan.html
+.\gpa.exe analyze samples\smooth_60fps.csv --target-fps 60 --report frame-analysis.md
+.\gpa.exe analyze any-captured-frame-times.csv --target-fps 144 --html frame-analysis.html
+```
+
+`analyze` works on frame-time CSV or JSON data and does not require elevation.
+
+## Docker / CSV Testing
+
+Docker is a testing, CI, and demonstration environment for the platform-independent frame analysis engine. It does not replace the Windows hardware scan and cannot access Windows WMI or PowerShell counters.
+
+Frame analysis accepts CSV files with `frame,frametime_ms` columns. Samples are provided in `samples/`. Tools that export frametime data (e.g., CapFrameX, RTSS) can be used to produce compatible files.
+
+Build the image and run the bundled example automatically:
+
+```bash
+docker build -t gpa .
+docker run --rm gpa
+```
+
+This runs `analyze` on a sample CSV bundled with the image. No Windows installation or user-provided CSV is required for the reviewer demo.
+
+With a real existing frame-time CSV, mount it into the container:
+
+```bash
+docker run --rm -v "${PWD}:/data" gpa analyze /data/my-recording.csv --target-fps 60
+```
+
+The Docker workflow demonstrates that the Go analysis and recommendation math is platform-independent. Normal users should double-click `gpa.exe` instead of using Docker or creating CSV files.
+
+## Commands
 
 ```text
-┌────────────────────────────────────────────┐
-│ GAME PERFORMANCE ADVISOR                   │
-└────────────────────────────────────────────┘
-
-System Summary
-  Detected CPU       AMD Ryzen 7 7800X3D
-  Detected GPU       NVIDIA RTX 4070
-  Memory             32.0 GB
-  Display            2560x1440 @ 165 Hz
-
-Performance Snapshot
-  GPU utilization    96%
-  CPU utilization    48%
-  Memory utilization 58%
-
-Performance Assessment
-  Performance Score          78 / 100
-  FG Readiness               90 / 100
-  Confidence                 82 / 100
-  Primary Diagnosis          GPU Limited
+gpa.exe scan [--json] [--report report.md] [--html report.html]
+gpa.exe monitor [--duration 15] [--interval 2]
+gpa.exe capture [15s] [--manual] [--process name] [--pid id]
+gpa.exe analyze <frame-times.csv|json> [--target-fps 60]
+gpa.exe compare before.csv after.csv [--report comparison.md] [--html comparison.html]
 ```
-
-![Terminal scan example](docs/images/terminal-scan.svg)
-
-## Monitoring
-
-The desktop monitoring commands are resource snapshots and should not be used as
-frame-generation evidence:
-
-```powershell
-game-performance-advisor.exe monitor --duration 15 --interval 2
-```
-
-Convenience syntax for a 15-second capture:
-
-```powershell
-game-performance-advisor.exe capture 15s
-```
-
-Capture/monitor support live utilization and running process information. Real frame
-timing, PresentMon, ETW, RTSS, or FrameView integration can be added later without
-changing the system-analysis report model.
-
-## Real frame capture with PresentMon
-
-The interactive workflow is:
-
-1. Run `game-performance-advisor.exe capture`.
-2. The tool waits for gameplay processes.
-3. Launch Steam, Epic, Riot, Battle.net, HoYoPlay, or the game directly.
-4. Review the confidence-ranked candidates.
-5. Confirm or manually select the game executable.
-6. Capture starts and the report is generated after capture ends.
-
-PresentMon is authoritative for frame timing. Desktop CPU/GPU/memory values are
-never used by themselves to select a game.
-
-Install Intel PresentMon and add `PresentMon.exe` to `PATH`, or pass its location with
-`--presentmon`.
-
-Capture for a fixed duration:
-
-```powershell
-game-performance-advisor.exe capture 15s --target-fps 144 --html capture.html --report capture.md
-```
-
-Start a manual play session and press ENTER to stop:
-
-```powershell
-game-performance-advisor.exe capture --manual --target-fps 144 --html capture.html
-```
-
-Capture a named process or process ID:
-
-```powershell
-game-performance-advisor.exe capture --duration 15 --process "Cyberpunk2077.exe" --target-fps 60
-game-performance-advisor.exe capture --duration 15 --pid 1234 --presentmon "C:\Tools\PresentMon.exe"
-```
-
-The capture produces:
-
-- A raw PresentMon CSV
-- A normalized `*-frametimes.csv`
-- Average and 1%/0.1% low FPS
-- Stutter percentage
-- Frame health scores
-- Bottleneck diagnosis and evidence
-- DLSS/FSR/XeSS and frame-generation suitability
-
-The raw capture is converted into the existing frametime analysis engine before
-recommendations are generated.
-
-## Before / after comparison
-
-Save normalized captures and compare them after a settings or driver change:
-
-```powershell
-game-performance-advisor.exe capture 30s --save before.csv --target-fps 60
-game-performance-advisor.exe capture 30s --save after.csv --target-fps 60
-game-performance-advisor.exe compare before.csv after.csv --report comparison.md --html comparison.html
-```
-
-The report shows changes in average FPS, 1% lows, 0.1% lows, frame health, stutters,
-and the resulting recommendation.
 
 ## Reports
 
-Generate Markdown or HTML:
-
-```powershell
-game-performance-advisor.exe scan --report scan.md --html scan.html
-```
-
-Emit JSON:
-
-```powershell
-game-performance-advisor.exe scan --json
-```
-
-## Advanced frame-time import
-
-CSV and JSON remain available for situations where frame-time measurements were
-captured separately:
-
-```powershell
-game-performance-advisor.exe analyze samples\smooth_60fps.csv --target-fps 60 --report frame-analysis.md
-```
-
-Supported CSV header:
-
-```csv
-frame,frametime_ms
-1,16.67
-2,16.71
-```
-
-## Build
-
-Requirements:
-
-- Windows 10/11 for native machine collection
-- Go 1.26 or newer
-
-```powershell
-go mod tidy
-go test ./...
-go build -o game-performance-advisor.exe ./cmd/game-performance-advisor
-.\game-performance-advisor.exe scan
-```
-
-PowerShell is used to query Windows CIM/WMI inventory and performance counters.
-NVIDIA utilization is enhanced with `nvidia-smi` when available. Missing metrics are
-reported explicitly rather than fabricated.
-
-## Docker
-
-The binary is built in a multi-stage Docker image:
-
-```powershell
-docker build -t game-performance-advisor .
-docker run --rm game-performance-advisor analyze /samples/smooth_60fps.csv --target-fps 60
-```
-
-Container environments cannot inspect the Windows host by default. Native Windows
-`scan` and `monitor` should be run on the target PC. Docker is most useful for the
-advanced CSV workflow or CI builds.
+- `--json` emits machine-readable system or capture data.
+- `--report <file.md>` writes a Markdown report.
+- `--html <file.html>` writes a standalone HTML report.
 
 ## Architecture
 
 ```text
 cmd/game-performance-advisor/
 internal/
-  system/       Windows/CIM machine inventory
-  metrics/      live utilization and process discovery
-  analysis/     bottleneck, confidence, and score calculations
-  recommend/    explainable action and FG readiness rules
-  report/       terminal, Markdown, JSON, and HTML rendering
-  input/        advanced CSV/JSON frame imports
+  system/       Linux /proc inventory and embedded Windows/CIM script
+  metrics/      Linux /proc metrics and embedded Windows metrics script
+  analysis/     Bottleneck, confidence, and score calculations
+  recommend/    Explainable action and frame-generation rules
+  report/       Embedded HTML/Markdown templates and JSON rendering
+  capture/      Capture support
+  input/        CSV/JSON frame imports
 ```
+
+PowerShell scripts and report templates are compiled into the executable with Go's `embed` package. Temporary copies of embedded scripts are created only while PowerShell executes them and are deleted afterward.
 
 ## Diagnostics
 
@@ -231,20 +97,37 @@ internal/
 - Memory pressure: memory utilization is at or above a high-pressure threshold.
 - Balanced: no dominant pressure is detected.
 
-Confidence and recommendations are deliberately transparent. Missing GPU telemetry,
-display refresh, or game-process detection lowers confidence and is stated in the
-Evidence/Limitations section.
+Confidence and recommendations are transparent; missing GPU telemetry, display refresh, or game-process detection reduces confidence and is stated in the report.
 
-## Tests
+## Advanced / Developer
+
+This section is for building or contributing from source.
+
+Build the final standalone executable with no debug symbols or trim paths:
+
+```powershell
+go build -trimpath -ldflags="-s -w" -o gpa.exe ./cmd/game-performance-advisor
+```
+
+Run source tests:
 
 ```powershell
 go test ./...
+go vet ./...
 ```
 
-The tests cover bottleneck classification, unavailable telemetry, GPU/CPU
-recommendations, frame imports, and report generation.
+Optional developer requirements:
+
+- Go for building from source
+- Docker verifies the platform-independent CSV analysis engine and CI workflows; it does not provide the Windows hardware scan
+PowerShell is used by the native Windows build to query Windows CIM/WMI inventory and performance counters. NVIDIA utilization is enhanced with `nvidia-smi` when available.
 
 ## AI-assisted development notes
 
-**PLACEHOLDER: Add the AI tools used, approximate time spent, key implementation
-steps, and validation performed.**
+**Tools used:** GitHub Copilot
+
+**Approach:** Plan-first workflow, package boundaries, targeted tests, and review of generated diffs.
+
+I designed the architecture to use Go's `embed` package for a zero-dependency single binary.
+
+Key verification areas include frame-time calculations, CPU/GPU bottleneck classification, report generation, capture argument parsing, and embedded script execution.
