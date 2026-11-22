@@ -2,8 +2,23 @@ package metrics
 
 import (
 	"bytes"
+	"os"
 	"testing"
 )
+
+func TestCreateTemporaryPowerShellScriptCleansUp(t *testing.T) {
+	path, cleanup, err := CreateTemporaryPowerShellScript([]byte("Write-Output test"), "gpa-test-*.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("temporary script was not created: %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("temporary script was not removed: %v", err)
+	}
+}
 
 func TestNormalizeCollectorJSONSingleObject(t *testing.T) {
 	raw := []byte(`{"cpu":25.5,"gpu_available":true}`)

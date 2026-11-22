@@ -5,7 +5,24 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/example/game-performance-advisor/internal/metrics"
 )
+
+func TestAverageSnapshotsIncludesPeakAndP95(t *testing.T) {
+	samples := []metrics.Snapshot{
+		{CPUPercent: 10, GPUPercent: 20, RAMPercent: 30},
+		{CPUPercent: 30, GPUPercent: 40, RAMPercent: 50},
+		{CPUPercent: 50, GPUPercent: 60, RAMPercent: 70},
+	}
+	result := averageSnapshots(samples)
+	if result.CPUPeakPercent != 50 || result.GPUPeakPercent != 60 || result.RAMPeakPercent != 70 {
+		t.Fatalf("unexpected peaks: CPU %.1f GPU %.1f RAM %.1f", result.CPUPeakPercent, result.GPUPeakPercent, result.RAMPeakPercent)
+	}
+	if result.CPUP95Percent != 50 || result.GPUP95Percent != 60 || result.RAMP95Percent != 70 {
+		t.Fatalf("unexpected p95 values: CPU %.1f GPU %.1f RAM %.1f", result.CPUP95Percent, result.GPUP95Percent, result.RAMP95Percent)
+	}
+}
 
 func TestHardwarePlatformDetection(t *testing.T) {
 	tests := []struct {

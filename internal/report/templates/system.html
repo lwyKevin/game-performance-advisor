@@ -26,8 +26,11 @@
 <div class="row"><span>Operating System</span><strong>{{.Machine.OS}}</strong></div></section>
 <section class="panel"><h2>Performance Snapshot</h2>
 <div class="row"><span>CPU utilization</span><strong>{{printf "%.0f" .Snapshot.CPUPercent}}%</strong></div>
+<div class="row"><span>CPU peak / p95</span><strong>{{printf "%.0f" .Snapshot.CPUPeakPercent}}% / {{printf "%.0f" .Snapshot.CPUP95Percent}}%</strong></div>
 <div class="row"><span>GPU utilization</span><strong>{{printf "%.0f" .Snapshot.GPUPercent}}%</strong></div>
-<div class="row"><span>Memory utilization</span><strong>{{printf "%.0f" .Snapshot.RAMPercent}}%</strong></div></section>
+<div class="row"><span>GPU peak / p95</span><strong>{{printf "%.0f" .Snapshot.GPUPeakPercent}}% / {{printf "%.0f" .Snapshot.GPUP95Percent}}%</strong></div>
+<div class="row"><span>Memory utilization</span><strong>{{printf "%.0f" .Snapshot.RAMPercent}}%</strong></div>
+<div class="row"><span>Memory peak / p95</span><strong>{{printf "%.0f" .Snapshot.RAMPeakPercent}}% / {{printf "%.0f" .Snapshot.RAMP95Percent}}%</strong></div></section>
 </div>
 <div class="main">
 <section class="panel"><h2>Diagnosis</h2><h3 class="cyan">{{.Assessment.Diagnosis}}</h3>

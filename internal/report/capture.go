@@ -40,8 +40,16 @@ func CaptureTerminal(r CaptureReport) string {
 	fmt.Fprintf(&b, "  Captured CSV          %s\n", r.Capture.OutputCSV)
 	fmt.Fprintln(&b, "\nFrame Performance")
 	fmt.Fprintf(&b, "  Average FPS           %.1f\n", a.AverageFPS)
-	fmt.Fprintf(&b, "  1%% Low FPS            %.1f\n", a.OnePercentLowFPS)
-	fmt.Fprintf(&b, "  0.1%% Low FPS          %.1f\n", a.PointOnePercentLowFPS)
+	if a.OnePercentLowAvailable {
+		fmt.Fprintf(&b, "  1%% Low FPS            %.1f\n", a.OnePercentLowFPS)
+	} else {
+		fmt.Fprintln(&b, "  1% Low FPS            Not available (<100 frames)")
+	}
+	if a.PointOnePercentLowAvailable {
+		fmt.Fprintf(&b, "  0.1%% Low FPS          %.1f\n", a.PointOnePercentLowFPS)
+	} else {
+		fmt.Fprintln(&b, "  0.1% Low FPS          Not available (<1000 frames)")
+	}
 	fmt.Fprintf(&b, "  Average frametime     %.2f ms\n", a.AverageMS)
 	fmt.Fprintf(&b, "  Stutters              %.1f%% (%d frames)\n", a.StutterPercent, a.StutterCount)
 	fmt.Fprintln(&b, "\nFrame Health")
@@ -87,8 +95,17 @@ func CaptureMarkdown(r CaptureReport) string {
 		r.Capture.Provider, a.FrameCount, r.Capture.DurationSeconds, r.Capture.OutputCSV)
 	fmt.Fprintln(&b, "## Frame Performance")
 	fmt.Fprintf(&b, "\n| Metric | Value |\n|---|---:|\n")
-	fmt.Fprintf(&b, "| Average FPS | %.1f |\n| 1%% Low FPS | %.1f |\n| 0.1%% Low FPS | %.1f |\n",
-		a.AverageFPS, a.OnePercentLowFPS, a.PointOnePercentLowFPS)
+	fmt.Fprintf(&b, "| Average FPS | %.1f |\n", a.AverageFPS)
+	if a.OnePercentLowAvailable {
+		fmt.Fprintf(&b, "| 1%% Low FPS | %.1f |\n", a.OnePercentLowFPS)
+	} else {
+		fmt.Fprintln(&b, "| 1% Low FPS | Not available (<100 frames) |")
+	}
+	if a.PointOnePercentLowAvailable {
+		fmt.Fprintf(&b, "| 0.1%% Low FPS | %.1f |\n", a.PointOnePercentLowFPS)
+	} else {
+		fmt.Fprintln(&b, "| 0.1% Low FPS | Not available (<1000 frames) |")
+	}
 	fmt.Fprintf(&b, "| Average frametime | %.2f ms |\n| Stutters | %.1f%% (%d frames) |\n",
 		a.AverageMS, a.StutterPercent, a.StutterCount)
 	fmt.Fprintf(&b, "\n## Frame Health\n\n- Overall: **%d / 100**\n- Smoothness: %d / 100\n- Consistency: %d / 100\n- Stutter resistance: %d / 100\n",
@@ -106,14 +123,44 @@ func CaptureMarkdown(r CaptureReport) string {
 	return b.String()
 }
 
+func lowFPSMarkdown(a analysis.Result, pointOne bool) string {
+	if pointOne {
+		if !a.PointOnePercentLowAvailable {
+			return "N/A"
+		}
+		return fmt.Sprintf("%.1f", a.PointOnePercentLowFPS)
+	}
+	if !a.OnePercentLowAvailable {
+		return "N/A"
+	}
+	return fmt.Sprintf("%.1f", a.OnePercentLowFPS)
+}
+
+func lowFPSChangeMarkdown(before, after analysis.Result, pointOne bool) string {
+	if pointOne {
+		if !before.PointOnePercentLowAvailable || !after.PointOnePercentLowAvailable {
+			return "N/A"
+		}
+		return fmt.Sprintf("%+.1f", after.PointOnePercentLowFPS-before.PointOnePercentLowFPS)
+	}
+	if !before.OnePercentLowAvailable || !after.OnePercentLowAvailable {
+		return "N/A"
+	}
+	return fmt.Sprintf("%+.1f", after.OnePercentLowFPS-before.OnePercentLowFPS)
+}
+
 func ComparisonMarkdown(before, after CaptureReport) string {
 	beforeA, afterA := before.Analysis, after.Analysis
 	var b strings.Builder
 	fmt.Fprintln(&b, "# Before / After Performance Comparison")
 	fmt.Fprintf(&b, "\n| Metric | Before | After | Change |\n|---|---:|---:|---:|\n")
 	fmt.Fprintf(&b, "| Average FPS | %.1f | %.1f | %+.1f |\n", beforeA.AverageFPS, afterA.AverageFPS, afterA.AverageFPS-beforeA.AverageFPS)
-	fmt.Fprintf(&b, "| 1%% Low FPS | %.1f | %.1f | %+.1f |\n", beforeA.OnePercentLowFPS, afterA.OnePercentLowFPS, afterA.OnePercentLowFPS-beforeA.OnePercentLowFPS)
-	fmt.Fprintf(&b, "| 0.1%% Low FPS | %.1f | %.1f | %+.1f |\n", beforeA.PointOnePercentLowFPS, afterA.PointOnePercentLowFPS, afterA.PointOnePercentLowFPS-beforeA.PointOnePercentLowFPS)
+	fmt.Fprintf(&b, "| 1%% Low FPS | %s | %s | %s |\n",
+		lowFPSMarkdown(beforeA, false), lowFPSMarkdown(afterA, false),
+		lowFPSChangeMarkdown(beforeA, afterA, false))
+	fmt.Fprintf(&b, "| 0.1%% Low FPS | %s | %s | %s |\n",
+		lowFPSMarkdown(beforeA, true), lowFPSMarkdown(afterA, true),
+		lowFPSChangeMarkdown(beforeA, afterA, true))
 	fmt.Fprintf(&b, "| Frame Health | %d | %d | %+d |\n", beforeA.HealthScore, afterA.HealthScore, afterA.HealthScore-beforeA.HealthScore)
 	fmt.Fprintf(&b, "| Stutters | %.1f%% | %.1f%% | %+.1f pp |\n", beforeA.StutterPercent, afterA.StutterPercent, afterA.StutterPercent-beforeA.StutterPercent)
 	fmt.Fprintf(&b, "\n## Before\n\n- Diagnosis: %s\n- Recommendation: %s (%s)\n",
@@ -131,14 +178,14 @@ func ComparisonHTML(before, after CaptureReport) string {
 </style></head><body><main class="shell"><h1>Before / After Performance Comparison</h1>
 <div class="grid"><div class="panel"><span>Average FPS</span><strong>%.1f</strong></div><div class="panel"><span>After</span><strong>%.1f</strong></div><div class="panel"><span>Change</span><strong class="delta">%+.1f</strong></div></div>
 <table><thead><tr><th>Metric</th><th>Before</th><th>After</th></tr></thead><tbody>
-<tr><td>1%% Low FPS</td><td>%.1f</td><td>%.1f</td></tr>
-<tr><td>0.1%% Low FPS</td><td>%.1f</td><td>%.1f</td></tr>
+<tr><td>1%% Low FPS</td><td>%s</td><td>%s</td></tr>
+<tr><td>0.1%% Low FPS</td><td>%s</td><td>%s</td></tr>
 <tr><td>Frame Health</td><td>%d</td><td>%d</td></tr>
 <tr><td>Stutters</td><td>%.1f%%</td><td>%.1f%%</td></tr>
 </tbody></table></main></body></html>`,
 		beforeA.AverageFPS, afterA.AverageFPS, afterA.AverageFPS-beforeA.AverageFPS,
-		beforeA.OnePercentLowFPS, afterA.OnePercentLowFPS,
-		beforeA.PointOnePercentLowFPS, afterA.PointOnePercentLowFPS,
+		lowFPSMarkdown(beforeA, false), lowFPSMarkdown(afterA, false),
+		lowFPSMarkdown(beforeA, true), lowFPSMarkdown(afterA, true),
 		beforeA.HealthScore, afterA.HealthScore,
 		beforeA.StutterPercent, afterA.StutterPercent)
 }

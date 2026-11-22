@@ -13,8 +13,11 @@
 ## Performance Snapshot
 
 - GPU: {{printf "%.0f" .Snapshot.GPUPercent}}%
+- GPU peak / p95: {{printf "%.0f" .Snapshot.GPUPeakPercent}}% / {{printf "%.0f" .Snapshot.GPUP95Percent}}%
 - CPU: {{printf "%.0f" .Snapshot.CPUPercent}}%
+- CPU peak / p95: {{printf "%.0f" .Snapshot.CPUPeakPercent}}% / {{printf "%.0f" .Snapshot.CPUP95Percent}}%
 - Memory: {{printf "%.0f" .Snapshot.RAMPercent}}%
+- Memory peak / p95: {{printf "%.0f" .Snapshot.RAMPeakPercent}}% / {{printf "%.0f" .Snapshot.RAMP95Percent}}%
 
 ## Assessment
 

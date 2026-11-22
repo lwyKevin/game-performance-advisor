@@ -32,6 +32,29 @@ func NormalizeCollectorJSON(raw []byte) ([]byte, error) {
 	return normalizeCollectorJSON(raw)
 }
 
+// CreateTemporaryPowerShellScript writes an embedded script for execution and
+// returns a cleanup function that removes the temporary file.
+func CreateTemporaryPowerShellScript(script []byte, pattern string) (string, func(), error) {
+	temp, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", nil, err
+	}
+	tempPath := temp.Name()
+	cleanup := func() {
+		_ = temp.Close()
+		_ = os.Remove(tempPath)
+	}
+	if _, err := temp.Write(script); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return "", nil, err
+	}
+	return tempPath, cleanup, nil
+}
+
 type Snapshot struct {
 	CapturedAt        time.Time `json:"captured_at"`
 	CPUPercent        float64   `json:"cpu_percent"`
@@ -39,6 +62,12 @@ type Snapshot struct {
 	GPUAvailable      bool      `json:"gpu_available"`
 	RAMUsedBytes      uint64    `json:"ram_used_bytes"`
 	RAMPercent        float64   `json:"ram_percent"`
+	CPUP95Percent     float64   `json:"cpu_p95_percent"`
+	CPUPeakPercent    float64   `json:"cpu_peak_percent"`
+	GPUP95Percent     float64   `json:"gpu_p95_percent"`
+	GPUPeakPercent    float64   `json:"gpu_peak_percent"`
+	RAMP95Percent     float64   `json:"ram_p95_percent"`
+	RAMPeakPercent    float64   `json:"ram_peak_percent"`
 	Processes         []Process `json:"processes"`
 	GameProcesses     []Process `json:"likely_game_processes"`
 	ForegroundProcess string    `json:"foreground_process"`
@@ -144,19 +173,11 @@ func Collect() (Snapshot, error) {
 	if err != nil {
 		return snapshot, fmt.Errorf("read embedded Windows metrics script: %w", err)
 	}
-	temp, err := os.CreateTemp("", "gpa-metrics-*.ps1")
+	tempPath, cleanup, err := CreateTemporaryPowerShellScript(script, "gpa-metrics-*.ps1")
 	if err != nil {
-		return snapshot, fmt.Errorf("create temporary metrics script: %w", err)
+		return snapshot, fmt.Errorf("prepare temporary metrics script: %w", err)
 	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if _, err := temp.Write(script); err != nil {
-		temp.Close()
-		return snapshot, fmt.Errorf("write temporary metrics script: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return snapshot, fmt.Errorf("close temporary metrics script: %w", err)
-	}
+	defer cleanup()
 	output, err := exec.Command(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", tempPath).Output()
 	writeRawCollectorLog(output, string(script))
 	if err != nil {

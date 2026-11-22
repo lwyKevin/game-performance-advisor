@@ -1,0 +1,15 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test Docker image
+        run: docker build -t gpa .
+      - name: Run bundled frame analysis
+        run: docker run --rm gpa

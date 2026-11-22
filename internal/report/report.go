@@ -54,8 +54,11 @@ func Terminal(r SystemReport) string {
 	if !s.GPUAvailable {
 		fmt.Fprint(&b, " (not available)")
 	}
+	fmt.Fprintf(&b, "\n  GPU peak / p95     %.0f%% / %.0f%%", s.GPUPeakPercent, s.GPUP95Percent)
 	fmt.Fprintf(&b, "\n  CPU utilization    %.0f%%\n", s.CPUPercent)
+	fmt.Fprintf(&b, "  CPU peak / p95     %.0f%% / %.0f%%\n", s.CPUPeakPercent, s.CPUP95Percent)
 	fmt.Fprintf(&b, "  Memory utilization %.0f%%\n", s.RAMPercent)
+	fmt.Fprintf(&b, "  Memory peak / p95  %.0f%% / %.0f%%\n", s.RAMPeakPercent, s.RAMP95Percent)
 	if len(s.GameProcesses) > 0 {
 		fmt.Fprintf(&b, "  Likely game        %s\n", s.GameProcesses[0].Name)
 	}

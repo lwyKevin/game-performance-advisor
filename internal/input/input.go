@@ -62,6 +62,7 @@ func Read(path, format string) ([]float64, error) {
 func readCSV(r io.Reader) ([]float64, error) {
 	cr := csv.NewReader(bufio.NewReader(r))
 	cr.TrimLeadingSpace = true
+	cr.FieldsPerRecord = -1
 	records, err := cr.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("read CSV: %w", err)
@@ -89,7 +90,7 @@ func readCSV(r io.Reader) ([]float64, error) {
 		}
 		text := strings.TrimSpace(row[msColumn])
 		if text == "" {
-			continue
+			return nil, fmt.Errorf("row %d has an empty frametime_ms value", i+2)
 		}
 		value, err := strconv.ParseFloat(text, 64)
 		if err != nil {

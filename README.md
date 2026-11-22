@@ -66,6 +66,8 @@ The `frametime_ms` column is required. The `frame` column is accepted but does n
 
 Bundled samples are in [`samples/`](samples/). Tools that export frametime data, such as CapFrameX or RTSS, can produce compatible files after column export or conversion. GPA does not parse raw multi-column capture formats directly.
 
+CSV validation is strict: the `frametime_ms` header is required, every frametime row must contain a value, and values must parse as positive numbers. Missing, blank, invalid, zero, and negative frametime values return an error. Extra columns are allowed. GPA does not silently skip malformed rows.
+
 ## CLI Commands
 
 ### Analyze one recording
@@ -144,6 +146,10 @@ The frame-time calculations are verified with known values rather than only by e
 - A stutter is counted when a frametime is greater than `1.8 ×` the median; the default threshold is configurable with `--stutter-threshold`.
 
 For the 1000-frame 1% low example, 999 frames are `16.67 ms` and one frame is `100 ms`. GPA sorts the frametimes and takes the slowest `ceil(1000 × 0.01) = 10` frames. It averages their frametimes: `(9 × 16.67 + 100) ÷ 10 = 25.003 ms`. It then converts that average to FPS: `1000 ÷ 25.003 = approximately 39.995 FPS`. For 0.1% low, it takes the slowest `ceil(1000 × 0.001) = 1` frame and converts `100 ms` to `10 FPS`.
+
+The stutter threshold is a configurable median-relative heuristic: a frame is counted as a stutter when it exceeds `1.8 × median`. The default is documented as a practical pacing heuristic rather than a calibrated hardware benchmark. Widely split or bimodal distributions produce a limitation warning because median-relative stutter counting can undercount sustained alternation.
+
+The 1% low result is reported only for captures with at least 100 frames. The 0.1% low result is reported only for captures with at least 1000 frames; shorter captures receive an explicit "not available" limitation instead of a statistically misleading percentile.
 
 These rules are implemented in [the analysis package](internal/analysis/analysis.go). The unit tests cover smooth data, 1%/0.1% low values, coefficient-of-variation frame pacing, one hitch, invalid input, and occasional hitch classification.
 
@@ -248,6 +254,12 @@ The Dockerfile uses a multi-stage build:
 3. A scratch image contains the binary and bundled samples.
 4. The default command runs `analyze` on the smooth 60-FPS sample.
 
+The Windows PowerShell collectors share a temporary-script helper that closes and removes the temporary script after normal success or collection failure. A focused unit test verifies temporary-file cleanup.
+
+## CI
+
+GitHub Actions builds and runs the project through Docker on every push and pull request. The Linux CI workflow runs `go test ./...`, builds the `gpa` image, and executes the default frame analysis.
+
 ## Bonus: Windows Hardware Diagnostics
 
 On Windows, GPA can additionally provide live hardware diagnostics:
@@ -258,5 +270,7 @@ On Windows, GPA can additionally provide live hardware diagnostics:
 ```
 
 The `scan` command inspects Windows hardware and live utilization. The `monitor` command collects repeated utilization snapshots. These commands use Windows-specific inventory and metric collection and are only supported on Windows.
+
+Monitor reports average, peak, and p95 CPU, GPU, and memory utilization so short spikes are not hidden by averages alone.
 
 On Linux or macOS, `scan` and `monitor` return a helpful message directing you to `analyze` and `compare`. Frame-time analysis remains available without Windows-specific hardware access.

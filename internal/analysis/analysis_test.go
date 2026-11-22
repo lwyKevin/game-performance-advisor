@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -43,8 +44,11 @@ func TestAnalyzeDetectsOneHitch(t *testing.T) {
 	if result.StutterCount != 1 {
 		t.Fatalf("stutter count = %d, want 1", result.StutterCount)
 	}
-	if math.Abs(result.OnePercentLowFPS-20) > 0.001 {
-		t.Fatalf("1%% low FPS = %.3f, want 20", result.OnePercentLowFPS)
+	if result.OnePercentLowAvailable {
+		t.Fatal("1% low should be unavailable for 10 frames")
+	}
+	if result.OnePercentLowFPS != 0 {
+		t.Fatalf("1%% low FPS = %.3f, want 0 when unavailable", result.OnePercentLowFPS)
 	}
 }
 
@@ -89,6 +93,51 @@ func TestAnalyzeKnownFramePacing(t *testing.T) {
 	}
 	if result.StutterCount != 0 {
 		t.Fatalf("stutter count = %d, want 0", result.StutterCount)
+	}
+}
+
+func TestAnalyzeRejectsNoMeaningfulSmallSampleLowPercentiles(t *testing.T) {
+	values := make([]float64, 200)
+	for i := range values {
+		values[i] = 16.67
+	}
+	result, err := Analyze(values, 60, 1.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.OnePercentLowAvailable {
+		t.Fatal("1% low should be available for 200 frames")
+	}
+	if result.PointOnePercentLowAvailable {
+		t.Fatal("0.1% low should be unavailable for 200 frames")
+	}
+	if result.PointOnePercentLowFPS != 0 {
+		t.Fatalf("0.1%% low FPS = %.3f, want 0", result.PointOnePercentLowFPS)
+	}
+}
+
+func TestAnalyzeWarnsAboutBimodalDistribution(t *testing.T) {
+	values := make([]float64, 100)
+	for i := range values {
+		if i%2 == 0 {
+			values[i] = 16.67
+		} else {
+			values[i] = 33.34
+		}
+	}
+	result, err := Analyze(values, 60, 1.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundWarning := false
+	for _, evidence := range result.Evidence {
+		if strings.Contains(evidence, "bimodal") {
+			foundWarning = true
+			break
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected bimodal limitation evidence, got %v", result.Evidence)
 	}
 }
 

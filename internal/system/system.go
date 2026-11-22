@@ -62,19 +62,11 @@ func Collect() (Info, error) {
 	if err != nil {
 		return info, fmt.Errorf("read embedded system inventory script: %w", err)
 	}
-	temp, err := os.CreateTemp("", "gpa-inventory-*.ps1")
+	tempPath, cleanup, err := gpametrics.CreateTemporaryPowerShellScript(script, "gpa-inventory-*.ps1")
 	if err != nil {
-		return info, fmt.Errorf("create temporary inventory script: %w", err)
+		return info, fmt.Errorf("prepare temporary inventory script: %w", err)
 	}
-	tempPath := temp.Name()
-	defer os.Remove(tempPath)
-	if _, err := temp.Write(script); err != nil {
-		temp.Close()
-		return info, fmt.Errorf("write temporary inventory script: %w", err)
-	}
-	if err := temp.Close(); err != nil {
-		return info, fmt.Errorf("close temporary inventory script: %w", err)
-	}
+	defer cleanup()
 	output, err := exec.Command(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", tempPath).Output()
 	if err != nil {
 		return info, fmt.Errorf("collect Windows system information: %w", err)

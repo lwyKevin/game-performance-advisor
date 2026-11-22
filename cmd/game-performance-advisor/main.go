@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -389,11 +391,17 @@ func averageSnapshots(samples []metrics.Snapshot) metrics.Snapshot {
 	if len(samples) == 0 {
 		return result
 	}
+	cpuValues := make([]float64, 0, len(samples))
+	gpuValues := make([]float64, 0, len(samples))
+	ramValues := make([]float64, 0, len(samples))
 	for _, sample := range samples {
 		result.CPUPercent += sample.CPUPercent
 		result.GPUPercent += sample.GPUPercent
 		result.RAMPercent += sample.RAMPercent
 		result.RAMUsedBytes += sample.RAMUsedBytes
+		cpuValues = append(cpuValues, sample.CPUPercent)
+		gpuValues = append(gpuValues, sample.GPUPercent)
+		ramValues = append(ramValues, sample.RAMPercent)
 		result.GPUAvailable = result.GPUAvailable || sample.GPUAvailable
 		if len(sample.GameProcesses) > 0 {
 			result.GameProcesses = append(result.GameProcesses, sample.GameProcesses...)
@@ -405,8 +413,43 @@ func averageSnapshots(samples []metrics.Snapshot) metrics.Snapshot {
 	result.GPUPercent /= count
 	result.RAMPercent /= count
 	result.RAMUsedBytes /= uint64(count)
+	result.CPUP95Percent = percentileFloat(cpuValues, 0.95)
+	result.CPUPeakPercent = maximumFloat(cpuValues)
+	result.GPUP95Percent = percentileFloat(gpuValues, 0.95)
+	result.GPUPeakPercent = maximumFloat(gpuValues)
+	result.RAMP95Percent = percentileFloat(ramValues, 0.95)
+	result.RAMPeakPercent = maximumFloat(ramValues)
 	result.CapturedAt = time.Now()
 	return result
+}
+
+func percentileFloat(values []float64, percentile float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	index := int(math.Ceil(float64(len(sorted))*percentile)) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(sorted) {
+		index = len(sorted) - 1
+	}
+	return sorted[index]
+}
+
+func maximumFloat(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	peak := values[0]
+	for _, value := range values[1:] {
+		if value > peak {
+			peak = value
+		}
+	}
+	return peak
 }
 
 func outputSystemReport(result report.SystemReport, jsonOutput bool, reportPath, htmlPath string, stdout *os.File) error {
@@ -518,7 +561,16 @@ func runAnalyze(args []string, stdout, stderr *os.File) error {
 	fmt.Fprintf(stdout, "Source              %s\n", args[0])
 	fmt.Fprintf(stdout, "Frames              %d\n", result.FrameCount)
 	fmt.Fprintf(stdout, "Average FPS         %.1f\n", result.AverageFPS)
-	fmt.Fprintf(stdout, "1%% Low FPS          %.1f\n", result.OnePercentLowFPS)
+	if result.OnePercentLowAvailable {
+		fmt.Fprintf(stdout, "1%% Low FPS          %.1f\n", result.OnePercentLowFPS)
+	} else {
+		fmt.Fprintln(stdout, "1% Low FPS          Not available (<100 frames)")
+	}
+	if result.PointOnePercentLowAvailable {
+		fmt.Fprintf(stdout, "0.1%% Low FPS        %.1f\n", result.PointOnePercentLowFPS)
+	} else {
+		fmt.Fprintln(stdout, "0.1% Low FPS        Not available (<1000 frames)")
+	}
 	fmt.Fprintf(stdout, "Frame Health        %d / 100\n", result.HealthScore)
 	fmt.Fprintf(stdout, "Diagnosis           %s (%d%% confidence)\n", result.Bottleneck, result.Confidence)
 	fmt.Fprintf(stdout, "FG Recommendation   %s (%s)\n", recommendation.FrameGeneration, recommendation.FGMultiplier)
@@ -526,8 +578,17 @@ func runAnalyze(args []string, stdout, stderr *os.File) error {
 	if *reportPath != "" {
 		var b strings.Builder
 		fmt.Fprintf(&b, "# Game Performance Advisor - Frame Import\n\n")
-		fmt.Fprintf(&b, "- Source: `%s`\n- Average FPS: %.1f\n- 1%% Low: %.1f FPS\n",
-			args[0], result.AverageFPS, result.OnePercentLowFPS)
+		fmt.Fprintf(&b, "- Source: `%s`\n- Average FPS: %.1f\n", args[0], result.AverageFPS)
+		if result.OnePercentLowAvailable {
+			fmt.Fprintf(&b, "- 1%% Low: %.1f FPS\n", result.OnePercentLowFPS)
+		} else {
+			fmt.Fprintln(&b, "- 1% Low: Not available (<100 frames)")
+		}
+		if result.PointOnePercentLowAvailable {
+			fmt.Fprintf(&b, "- 0.1%% Low: %.1f FPS\n", result.PointOnePercentLowFPS)
+		} else {
+			fmt.Fprintln(&b, "- 0.1% Low: Not available (<1000 frames)")
+		}
 		fmt.Fprintf(&b, "- Frame Health: %d / 100\n- Diagnosis: %s\n",
 			result.HealthScore, result.Bottleneck)
 		fmt.Fprintf(&b, "- Frame Generation: %s (%s)\n", recommendation.FrameGeneration, recommendation.FGMultiplier)
