@@ -21,10 +21,16 @@ Analyze another bundled sample:
 docker run --rm gpa analyze /samples/mixed_hitching.csv --target-fps 60
 ```
 
-Mount a host CSV:
+Mount a host CSV from the current directory. In Bash:
 
 ```bash
-docker run --rm -v "$(pwd):/data" gpa analyze /data/recording.csv --target-fps 144
+docker run --rm --mount type=bind,source="$(pwd)",target=/data gpa analyze /data/recording.csv --target-fps 144
+```
+
+In PowerShell:
+
+```powershell
+docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/data" gpa analyze /data/recording.csv --target-fps 144
 ```
 
 On Linux, scan hardware explicitly:
@@ -81,7 +87,7 @@ the CSV format accepted by GPA. It is not part of the Go CLI or its runtime:
 ```powershell
 python .\presentmon_converter.py .\data\src\pmcap-LimbusCompany.exe-261121-220342.csv .\data\dst\limbus_frametimes.csv
 
-docker run --rm -v "${PWD}:/data" gpa analyze /data/data/dst/limbus_frametimes.csv
+docker run --rm --mount "type=bind,source=$((Get-Location).Path),target=/data" gpa analyze /data/data/dst/limbus_frametimes.csv
 ```
 
 The helper filters invalid rows and reports how many frames were written. You
@@ -126,15 +132,17 @@ Hardware bottleneck diagnosis requires a CPU measurement over at least 1 second 
 ```mermaid
 flowchart LR
     CLI[cmd CLI] --> INPUT[CSV/JSON input]
-    INPUT --> ANALYSIS[Frame analysis]
-    ANALYSIS --> RECOMMEND[Recommendation rules]
-    RECOMMEND --> REPORT[One terminal/JSON report model]
+    INPUT --> FRAME_ANALYSIS[Frame analysis]
+    FRAME_ANALYSIS --> FRAME_RECOMMEND[Frame recommendation]
+    FRAME_RECOMMEND --> REPORT[One terminal/JSON report model]
 
     CLI --> COLLECTOR{Platform Collector}
     COLLECTOR -->|Linux procfs/sysfs| LINUX[Linux adapter]
     COLLECTOR -->|Windows bonus| WINDOWS[Windows PowerShell adapter]
-    LINUX --> ANALYSIS
-    WINDOWS --> ANALYSIS
+    LINUX --> SYSTEM_ANALYSIS[System analysis]
+    WINDOWS --> SYSTEM_ANALYSIS
+    SYSTEM_ANALYSIS --> SYSTEM_RECOMMEND[System recommendation]
+    SYSTEM_RECOMMEND --> REPORT
 ```
 
 ## Scope Trade-Off
@@ -162,7 +170,7 @@ Approach to AI output:
 
 ## Windows Bonus
 
-Windows hardware collection remains available through `scan`. The PowerShell adapter communicates through stdin and is separate from the Linux adapter. The Windows executable is cross-built in CI and attached to tagged GitHub Releases.
+Windows hardware collection remains available through `scan`. The Windows PowerShell scripts are embedded in the executable and run through encoded PowerShell commands; this adapter is separate from the Linux adapter. The Windows executable is cross-built in CI and attached to tagged GitHub Releases.
 
 ## Development
 
