@@ -3,12 +3,16 @@
 package metrics
 
 import (
+	"bytes"
 	"embed"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 //go:embed collector.ps1
@@ -35,14 +39,22 @@ func Collect() (Snapshot, error) {
 	if err != nil {
 		return snapshot, fmt.Errorf("read embedded Windows metrics script: %w", err)
 	}
-	cmd := exec.Command(shell, "-NoProfile", "-NonInteractive", "-Command", "-")
-	cmd.Stdin = strings.NewReader(string(script))
+	cmd := exec.Command(shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(script))
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	output, err := cmd.Output()
 	if err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail != "" {
+			return snapshot, fmt.Errorf("collect Windows metrics: %w: %s", err, detail)
+		}
 		return snapshot, fmt.Errorf("collect Windows metrics: %w", err)
 	}
 	var result psResult
 	text := strings.TrimSpace(strings.TrimPrefix(string(output), "\ufeff"))
+	if text == "" {
+		return snapshot, fmt.Errorf("collect Windows metrics: PowerShell returned no JSON output")
+	}
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		return snapshot, fmt.Errorf("parse Windows metrics: %w", err)
 	}
@@ -54,4 +66,13 @@ func Collect() (Snapshot, error) {
 	snapshot.RAMUsedBytes = result.RAMUsed
 	snapshot.RAMPercent = result.RAMPercent
 	return snapshot, nil
+}
+
+func encodePowerShell(script []byte) string {
+	runes := utf16.Encode([]rune(string(script)))
+	encoded := make([]byte, len(runes)*2)
+	for i, value := range runes {
+		binary.LittleEndian.PutUint16(encoded[i*2:], value)
+	}
+	return base64.StdEncoding.EncodeToString(encoded)
 }

@@ -27,7 +27,7 @@ Mount a host CSV:
 docker run --rm -v "$(pwd):/data" gpa analyze /data/recording.csv --target-fps 144
 ```
 
-On Linux or macOS, scan hardware explicitly:
+On Linux, scan hardware explicitly:
 
 ```bash
 docker run --rm gpa scan
@@ -35,6 +35,7 @@ go run ./cmd/game-performance-advisor scan
 ```
 
 `scan` reports procfs/sysfs inventory and, where available, NVIDIA utilization. Missing GPU or display values are shown as unavailable rather than fabricated.
+The native `scan` adapter is currently supported on Linux and Windows. macOS is not currently a supported build target.
 
 In Docker, JSON `scan` output includes `"environment": "container (linux)"`. Its CPU/GPU counters reflect the container runtime, not the Windows host. Run the Windows adapter natively for host metrics.
 
@@ -55,7 +56,7 @@ game-performance-advisor analyze <frame-times.csv|json> [--target-fps 60] [--stu
 game-performance-advisor scan [--json]
 ```
 
-`analyze` is the primary product and works on Linux, macOS, and Windows.
+`analyze` is the primary product and works on Linux and Windows.
 
 ## CSV Format
 
@@ -177,4 +178,4 @@ docker run --rm gpa
 - The stutter threshold and bottleneck thresholds are candidate heuristics.
 - Small captures do not report low FPS metrics when the frame count is insufficient.
 - Windows hardware metrics depend on the available WMI/PowerShell environment.
-- Linux GPU utilization depends on NVIDIA/ROCm tools or may remain unavailable.
+- Linux GPU utilization depends on `nvidia-smi` and may remain unavailable. ROCm can help identify an AMD GPU, but is not currently used to collect Linux GPU utilization.
